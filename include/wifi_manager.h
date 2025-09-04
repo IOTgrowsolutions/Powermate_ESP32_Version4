@@ -1,0 +1,15 @@
+#ifndef WIFI_MANAGER_H
+#define WIFI_MANAGER_H
+
+#include <Arduino.h>
+
+// Initializes and starts the WiFi in AP + STA mode.
+void wifi_setup();
+
+// Checks the WiFi connection status and handles reconnections.
+void wifi_check_status();
+
+// Generates the unique "PowerMate-XXXX" SSID.
+String wifi_get_unique_ssid();
+
+#endif // WIFI_MANAGER_H
