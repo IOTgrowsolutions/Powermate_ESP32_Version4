@@ -389,7 +389,13 @@ void handleInput() {
       "<div class='container'>"
       "<h1>Trigger Settings</h1>"
       "<div class='button-section' style='margin-bottom: 20px;'>"
-      "<button onclick='toggleDarkMode()' class='button'>Toggle Dark Mode</button>"
+      "<div style='display: flex; align-items: center; gap: 8px;'>"
+      "<span>Dark Mode</span>"
+      "<label class='switch'>"
+      "<input type='checkbox' id='darkModeToggle'>"
+      "<span class='slider'></span>"
+      "</label>"
+      "</div>"
       "</div>"
       "<form action='/submit' method='POST' id='triggerForm' onsubmit='return validateForm()'>"
   ));
@@ -405,7 +411,6 @@ void handleInput() {
       "<div class='button-grid'>"
       "<input type='submit' class='button' value='Save'>"
       "<button type='button' class='button' onclick='clearForm()'>Clear All</button>"
-      "<a href='/' class='button'>Back to Dashboard</a>"
       "</div>"
       "</form>"
       "<div id='errorMessages' class='error'></div>"
@@ -414,71 +419,76 @@ void handleInput() {
     sendSystemInfo();
   
     sendChunked(F(
-      "<script>"
-      "function toggleDarkMode() {"
-      "  document.body.classList.toggle('dark-mode');"
-      "  localStorage.setItem('darkMode', document.body.classList.contains('dark-mode'));"
-      "}"
-      "if (localStorage.getItem('darkMode') === 'true') {"
-      "  document.body.classList.add('dark-mode');"
-      "}"
-      "function clearForm() {"
-      "  var form = document.getElementById('triggerForm');"
-      "  var inputs = form.getElementsByTagName('input');"
-      "  for (var i = 0; i < inputs.length; i++) {"
-      "    if (inputs[i].type == 'text' || inputs[i].type == 'number' || inputs[i].type == 'time') {"
-      "      inputs[i].value = '';"
-      "    } else if (inputs[i].type == 'checkbox') {"
-      "      inputs[i].checked = false;"
-      "    }"
-      "  }"
-      "  var selects = form.getElementsByTagName('select');"
-      "  for (var i = 0; i < selects.length; i++) {"
-      "    selects[i].selectedIndex = 0;"
-      "  }"
-      "}"
-      "function validateForm() {"
-      "  var times = {};"
-      "  var errorMessages = [];"
-      "  var inputs = document.getElementsByTagName('input');"
-      "  var selects = document.getElementsByTagName('select');"
-      "  for (var i = 0; i < inputs.length; i++) {"
-      "    if (inputs[i].type == 'time' && inputs[i].name.startsWith('hour')) {"
-      "      var time = inputs[i].value;"
-      "      if (time && time in times) {"
-      "        errorMessages.push('Multiple timers set for ' + time + '. Please choose different times.');"
-      "      } else if (time) {"
-      "        times[time] = true;"
-      "      }"
-      "    } else if (inputs[i].type == 'number' && inputs[i].name.startsWith('delayBetweenActivations')) {"
-      "      var timerIndex = inputs[i].name.match(/\\d+/)[0];"
-      "      var delayValue = parseInt(inputs[i].value);"
-      "      var delayUnitSelect = document.getElementById('delayUnit' + timerIndex);"
-      "      var delayUnit = parseInt(delayUnitSelect.value);"
-      "      var delayInMs = delayValue * delayUnit;"
-      "      if (isNaN(delayValue) || delayInMs < 60000) {"
-      "        errorMessages.push('Delay Between Activations for Trigger ' + (parseInt(timerIndex) + 1) + ' must be at least 60 seconds.');"
-      "      }"
-      "    } else if (inputs[i].type == 'number' && inputs[i].name.startsWith('activationDuration')) {"
-      "      var activationDuration = parseInt(inputs[i].value);"
-      "      if (isNaN(activationDuration) || activationDuration <= 0) {"
-      "        var timerIndex = inputs[i].name.match(/\\d+/)[0];"
-      "        errorMessages.push('Activation Duration for Trigger ' + (parseInt(timerIndex) + 1) + ' must be greater than zero.');"
-      "      }"
-      "    }"
-      "  }"
-      "  if (errorMessages.length > 0) {"
-      "    document.getElementById('errorMessages').innerHTML = errorMessages.join('<br>');"
-      "    alert(errorMessages.join('\\n'));"
-      "    return false;"
-      "  }"
-      "  return true;"
-      "}"
-      "document.addEventListener('DOMContentLoaded', setupDarkMode);"
-      "</script>"
-      "</body>"
-      "</html>"
-    ));
+        "<script>"
+        "function clearForm() {"
+        "  var form = document.getElementById('triggerForm');"
+        "  var inputs = form.getElementsByTagName('input');"
+        "  for (var i = 0; i < inputs.length; i++) {"
+        "    if (inputs[i].type == 'text' || inputs[i].type == 'number' || inputs[i].type == 'time') {"
+        "      inputs[i].value = '';"
+        "    } else if (inputs[i].type == 'checkbox') {"
+        "      inputs[i].checked = false;"
+        "    }"
+        "  }"
+        "  var selects = form.getElementsByTagName('select');"
+        "  for (var i = 0; i < selects.length; i++) {"
+        "    selects[i].selectedIndex = 0;"
+        "  }"
+        "}"
+        "function validateForm() {"
+        "  var times = {};"
+        "  var errorMessages = [];"
+        "  var inputs = document.getElementsByTagName('input');"
+        "  var selects = document.getElementsByTagName('select');"
+        "  for (var i = 0; i < inputs.length; i++) {"
+        "    if (inputs[i].type == 'time' && inputs[i].name.startsWith('hour')) {"
+        "      var time = inputs[i].value;"
+        "      if (time && time in times) {"
+        "        errorMessages.push('Multiple timers set for ' + time + '. Please choose different times.');"
+        "      } else if (time) {"
+        "        times[time] = true;"
+        "      }"
+        "    } else if (inputs[i].type == 'number' && inputs[i].name.startsWith('delayBetweenActivations')) {"
+        "      var timerIndex = inputs[i].name.match(/\\d+/)[0];"
+        "      var delayValue = parseInt(inputs[i].value);"
+        "      var delayUnitSelect = document.getElementById('delayUnit' + timerIndex);"
+        "      var delayUnit = parseInt(delayUnitSelect.value);"
+        "      var delayInMs = delayValue * delayUnit;"
+        "      if (isNaN(delayValue) || delayInMs < 60000) {"
+        "        errorMessages.push('Delay Between Activations for Trigger ' + (parseInt(timerIndex) + 1) + ' must be at least 60 seconds.');"
+        "      }"
+        "    } else if (inputs[i].type == 'number' && inputs[i].name.startsWith('activationDuration')) {"
+        "      var activationDuration = parseInt(inputs[i].value);"
+        "      if (isNaN(activationDuration) || activationDuration <= 0) {"
+        "        var timerIndex = inputs[i].name.match(/\\d+/)[0];"
+        "        errorMessages.push('Activation Duration for Trigger ' + (parseInt(timerIndex) + 1) + ' must be greater than zero.');"
+        "      }"
+        "    }"
+        "  }"
+        "  if (errorMessages.length > 0) {"
+        "    document.getElementById('errorMessages').innerHTML = errorMessages.join('<br>');"
+        "    alert(errorMessages.join('\\n'));"
+        "    return false;"
+        "  }"
+        "  return true;"
+        "}"
+        "document.addEventListener('DOMContentLoaded', function() {"
+        "    const darkModeToggle = document.getElementById('darkModeToggle');"
+        "    const body = document.body;"
+        "    const darkMode = localStorage.getItem('darkMode') === 'true';"
+        "    body.classList.toggle('dark-mode', darkMode);"
+        "    if(darkModeToggle) { "
+        "        darkModeToggle.checked = darkMode;"
+        "        darkModeToggle.addEventListener('change', () => {"
+        "            body.classList.toggle('dark-mode');"
+        "            localStorage.setItem('darkMode', darkModeToggle.checked);"
+        "        });"
+        "    }"
+        "});"
+        "</script>"
+        "</body>"
+        "</html>"
+      ));
   
     sendChunked(F("<div>Some large HTML content</div>"));
     yield();
@@ -537,7 +547,6 @@ void handleTimerConfig() {
 
             <div class="button-grid">
                 <button type="button" onclick="updateTimers()" class="button">Update</button>
-                <a href="/" class="button">Back to Dashboard</a>
             </div>
         </div>
     </div>
@@ -773,12 +782,29 @@ String header = R"=====(
     </script>
 </head>
 <body>
+    <a href="/" class="back-button-icon" title="Back to Dashboard">←</a>
     <h1>Dashboard</h1>
     <div class='button-section'>
-    <button id="dark-mode-toggle">Toggle Dark Mode</button></div>
+    <div style="display: flex; align-items: center; gap: 8px;">
+        <span>Dark Mode</span>
+        <label class="switch">
+            <input type="checkbox" id="darkModeToggle">
+            <span class="slider"></span>
+        </label>
+    </div></div>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            setupDarkMode();
+            const darkModeToggle = document.getElementById('darkModeToggle');
+            const body = document.body;
+            const darkMode = localStorage.getItem('darkMode') === 'true';
+            body.classList.toggle('dark-mode', darkMode);
+            if(darkModeToggle) { 
+                darkModeToggle.checked = darkMode;
+                darkModeToggle.addEventListener('change', () => {
+                    body.classList.toggle('dark-mode');
+                    localStorage.setItem('darkMode', darkModeToggle.checked);
+                });
+            }
         });
     </script>
 )=====";
@@ -963,7 +989,7 @@ String generateCSS() {
 
     .time-update-form {
         display: grid;
-        grid-template-columns: repeat(2, 1fr);
+        grid-template-columns: repeat(1, 1fr);
         gap: 20px;
     }
 
@@ -1021,6 +1047,48 @@ String generateCSS() {
         padding: 10px;
         border-radius: 4px;
         background-color: rgba(231, 76, 60, 0.1);
+    }
+    .switch {
+        position: relative;
+        display: inline-block;
+        width: 60px;
+        height: 34px;
+    }
+    .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+    }
+    .slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: #ccc;
+        transition: .4s;
+        border-radius: 34px;
+    }
+    .slider:before {
+        position: absolute;
+        content: "";
+        height: 26px;
+        width: 26px;
+        left: 4px;
+        bottom: 4px;
+        background-color: white;
+        transition: .4s;
+        border-radius: 50%;
+    }
+    input:checked + .slider {
+        background-color: #2ecc71;
+    }
+    .dark-mode input:checked + .slider {
+        background-color: #2ecc71;
+    }
+    input:checked + .slider:before {
+        transform: translateX(26px);
     }
     /* Dark Mode Styles */
     body.dark-mode {
@@ -1097,11 +1165,55 @@ String generateCSS() {
     body.dark-mode .error-message {
         background-color: rgba(231, 76, 60, 0.2);
     }
+    .back-button-icon {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        font-size: 24px;
+        color: #3498db;
+        text-decoration: none;
+        z-index: 1000;
+        padding: 8px;
+        border-radius: 50%;
+        background-color: rgba(255, 255, 255, 0.9);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        transition: all 0.3s ease;
+        width: 40px;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .back-button-icon:hover {
+        background-color: #3498db;
+        color: white;
+        transform: scale(1.1);
+    }
+    body.dark-mode .back-button-icon {
+        background-color: rgba(30, 30, 30, 0.9);
+        color: #5dade2;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
+    body.dark-mode .back-button-icon:hover {
+        background-color: #5dade2;
+        color: #121212;
+    }
+    body.dark-mode input,
+    body.dark-mode select,
+    body.dark-mode textarea {
+        background-color: #2c2c2c;
+        color: #e0e0e0;
+        border-color: #444;
+    }
+    .back-button-icon {
+        position: fixed;
+        top: 20px;
+        right: 20px;
     /* Mobile Responsive Styles */
-    @media (max-width: 768px) {
+    @media (max-width: 600px) {
         .time-update-card {
             margin: 10px;
-            padding: 15px;
+            padding: 5px;
         }
 
         .time-update-form {
@@ -1117,6 +1229,10 @@ String generateCSS() {
         .submit-button {
             padding: 10px;
             font-size: 14px;
+        }
+        .back-button-icon {
+            top: 15px;
+            right: 15px;
         }
     }
   )=====";
@@ -1233,7 +1349,7 @@ String generateJavaScript() {
 
     function setupDarkMode() {
         console.log('Setting up dark mode');
-        var toggleButton = document.getElementById('dark-mode-toggle');
+        var toggleButton = document.getElementById('darkModeToggle');
         if (!toggleButton) {
             console.error('Dark mode toggle button not found');
             return;
@@ -1272,16 +1388,42 @@ String generateLogPage() {
         "    <meta name='viewport' content='width=device-width, initial-scale=1.0'>"
         "    <title>Activity Log</title>"
         "    <style>"
-        "        body { font-family: 'Arial', sans-serif; background-color: #f4f4f4; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }"
+        "        :root { --primary-color: #3498db; --border-radius: 8px; }"
+        "        body { font-family: 'Arial', sans-serif; background-color: #f4f4f4; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; transition: background-color 0.3s, color 0.3s; }"
+        "        body.dark-mode { background-color: #121212; color: #e0e0e0; }"
         "        h1 { text-align: center; color: #2c3e50; }"
-        "        table { width: 100%; border-collapse: collapse; margin-top: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }"
+        "        body.dark-mode h1 { color: #ecf0f1; }"
+        "        table { width: 100%; border-collapse: collapse; margin-top: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border-radius: var(--border-radius); overflow: hidden; }"
+        "        body.dark-mode table { box-shadow: 0 2px 4px rgba(0,0,0,0.2); }"
         "        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }"
+        "        body.dark-mode th, body.dark-mode td { border-bottom: 1px solid #444; }"
         "        th { background-color: #3498db; color: white; }"
+        "        body.dark-mode th { background-color: #2c3e50; }"
         "        tr:nth-child(even) { background-color: #f8f9fa; }"
+        "        body.dark-mode tr:nth-child(even) { background-color: #1e1e1e; }"
+        "        .button { display: inline-flex; align-items: center; justify-content: center; padding: 10px 20px; background-color: var(--primary-color); color: white; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; font-size: 15px; transition: background-color 0.3s; }"
+        "        .button:hover { background-color: #2980b9; }"
+        "        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }"
+        "        .switch { position: relative; display: inline-block; width: 60px; height: 34px; }"
+        "        .switch input { opacity: 0; width: 0; height: 0; }"
+        "        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }"
+        "        .slider:before { position: absolute; content: ''; height: 26px; width: 26px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }"
+        "        input:checked + .slider { background-color: var(--primary-color); }"
+        "        input:checked + .slider:before { transform: translateX(26px); }"
+        "        @media (max-width: 768px) { body { padding: 15px; } th, td { padding: 8px; } }"
         "    </style>"
         "</head>"
         "<body>"
-        "    <a href='/' class='button' style='display:inline-block; padding:10px 20px; background-color:#3498db; color:white; text-decoration:none; border-radius:4px;'>Back to Dashboard</a>"
+        "    <div class='header'>"
+        "        <a href='/' class='button'>Back to Dashboard</a>"
+        "        <div style='display: flex; align-items: center; gap: 8px;'>"
+        "            <span>Dark Mode</span>"
+        "            <label class='switch'>"
+        "                <input type='checkbox' id='darkModeToggle'>"
+        "                <span class='slider'></span>"
+        "            </label>"
+        "        </div>"
+        "    </div>"
         "    <h1>Activity Log</h1>"
         "    <table>"
         "        <thead><tr><th>Timestamp</th><th>Action</th></tr></thead>"
@@ -1309,6 +1451,21 @@ String generateLogPage() {
     page += F(
         "        </tbody>"
         "    </table>"
+        "    <script>"
+        "        document.addEventListener('DOMContentLoaded', function() {"
+        "            const darkModeToggle = document.getElementById('darkModeToggle');"
+        "            const body = document.body;"
+        "            const darkMode = localStorage.getItem('darkMode') === 'true';"
+        "            body.classList.toggle('dark-mode', darkMode);"
+        "            if(darkModeToggle) {"
+        "                darkModeToggle.checked = darkMode;"
+        "                darkModeToggle.addEventListener('change', () => {"
+        "                    body.classList.toggle('dark-mode');"
+        "                    localStorage.setItem('darkMode', darkModeToggle.checked);"
+        "                });"
+        "            }"
+        "        });"
+        "    </script>"
         "</body>"
         "</html>"
     );
@@ -1333,7 +1490,6 @@ String generateWiFiConfigForm() {
             </div>
             <div class='button-grid'>
                 <button type='submit' class='submit-button'>Save WiFi Settings</button>
-                <a href='/' class='button'>Back to Dashboard</a>
             </div>
         </form>
         <div id='wifiStatus'></div>
@@ -1500,7 +1656,6 @@ String generateMQTTConfigForm() {
            
             <div class='button-grid'>
                 <button type='submit' class='submit-button'>Save MQTT Settings</button>
-                <a href='/' class='button'>Back to Dashboard</a>
             </div>
         </form>
         <div id='mqttStatus'></div>
