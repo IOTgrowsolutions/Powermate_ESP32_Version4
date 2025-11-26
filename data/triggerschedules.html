@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>Trigger Settings</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 10px;
+            background-color: #f4f4f4;
+            color: #333;
+            transition: background-color 0.3s, color 0.3s;
+            font-size: 14px;
+        }
+
+        body.dark-mode {
+            background-color: #1a1a1a;
+            color: #f4f4f4;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+
+        .title {
+            font-size: 24px;
+            font-weight: 700;
+            margin: 0;
+        }
+
+        .trigger {
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        body.dark-mode .trigger {
+            background-color: #2c2c2c;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .trigger h2 {
+            margin-top: 0;
+            margin-bottom: 12px;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 6px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        input,
+        select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        input[type="checkbox"] {
+            width: auto;
+            margin-right: 10px;
+            cursor: pointer;
+            height: 20px;
+            width: 20px;
+        }
+
+        body.dark-mode input,
+        body.dark-mode select,
+        body.dark-mode button {
+            background-color: #333;
+            border-color: #444;
+            color: #f4f4f4;
+        }
+
+        .button-section {
+            display: flex;
+            gap: 10px;
+            margin: 20px 0;
+        }
+
+        .button-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .button {
+            flex: 1;
+            padding: 12px 20px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            text-align: center;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .button:hover {
+            background-color: #2980b9;
+        }
+
+        .error {
+            color: #e74c3c;
+            background-color: rgba(231, 76, 60, 0.1);
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+
+        body.dark-mode .error {
+            background-color: rgba(231, 76, 60, 0.2);
+        }
+
+        .days-container {
+            margin: 10px 0 20px 0;
+        }
+
+        .days-container label {
+            margin-right: 10px;
+        }
+
+        .system-info {
+            margin-top: 10px;
+            font-size: 13px;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: 0.4s;
+            border-radius: 34px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: #fff;
+            transition: 0.4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: #2ecc71;
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+
+        body.dark-mode input:checked + .slider {
+            background-color: #2ecc71;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+
+            .trigger {
+                padding: 15px;
+            }
+
+            .button-section {
+                flex-direction: column;
+            }
+
+            .button {
+                width: 100%;
+                margin: 5px 0;
+            }
+
+            input,
+            select {
+                font-size: 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1 class="title">Trigger Settings</h1>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span>Dark Mode</span>
+                <label class="switch">
+                    <input type="checkbox" id="darkModeToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+
+        <form action="/submit" method="POST" id="triggerForm" onsubmit="return validateForm()">
+            <div id="triggersContainer"></div>
+
+            <h2>Active Days</h2>
+            <div id="activeDaysContainer" class="days-container"></div>
+
+            <div class="button-grid">
+                <input type="submit" class="button" value="Save">
+                <button type="button" class="button" onclick="clearForm()">Clear All</button>
+                <a href="/" class="button">Back</a>
+            </div>
+
+            <div id="errorMessages" class="error"></div>
+        </form>
+
+        <div id="systemInfo" class="system-info"></div>
+    </div>
+
+    <script>
+        function clearForm() {
+            const form = document.getElementById('triggerForm');
+            if (!form) return;
+
+            const inputs = form.getElementsByTagName('input');
+            for (let i = 0; i < inputs.length; i++) {
+                if (inputs[i].type === 'text' || inputs[i].type === 'number' || inputs[i].type === 'time') {
+                    inputs[i].value = '';
+                } else if (inputs[i].type === 'checkbox') {
+                    inputs[i].checked = false;
+                }
+            }
+
+            const selects = form.getElementsByTagName('select');
+            for (let i = 0; i < selects.length; i++) {
+                selects[i].selectedIndex = 0;
+            }
+        }
+
+        function validateForm() {
+            const times = {};
+            const errorMessages = [];
+            const inputs = document.getElementsByTagName('input');
+            const selects = document.getElementsByTagName('select');
+
+            for (let i = 0; i < inputs.length; i++) {
+                if (inputs[i].type === 'time' && inputs[i].name.startsWith('hour')) {
+                    const time = inputs[i].value;
+                    if (time && times[time]) {
+                        errorMessages.push('Multiple timers set for ' + time + '. Please choose different times.');
+                    } else if (time) {
+                        times[time] = true;
+                    }
+                } else if (inputs[i].type === 'number' && inputs[i].name.startsWith('delayBetweenActivations')) {
+                    const timerIndex = inputs[i].name.match(/\d+/)[0];
+                    const delayValue = parseInt(inputs[i].value, 10);
+                    const delayUnitSelect = document.getElementById('delayUnit' + timerIndex);
+                    const delayUnit = delayUnitSelect ? parseInt(delayUnitSelect.value, 10) : 1000;
+                    const delayInMs = delayValue * delayUnit;
+                    if (isNaN(delayValue) || delayInMs < 60000) {
+                        errorMessages.push('Delay Between Activations for Trigger ' + (parseInt(timerIndex, 10) + 1) + ' must be at least 60 seconds.');
+                    }
+                } else if (inputs[i].type === 'number' && inputs[i].name.startsWith('activationDuration')) {
+                    const activationDuration = parseInt(inputs[i].value, 10);
+                    if (isNaN(activationDuration) || activationDuration <= 0) {
+                        const timerIndex = inputs[i].name.match(/\d+/)[0];
+                        errorMessages.push('Activation Duration for Trigger ' + (parseInt(timerIndex, 10) + 1) + ' must be greater than zero.');
+                    }
+                }
+            }
+
+            if (errorMessages.length > 0) {
+                document.getElementById('errorMessages').innerHTML = errorMessages.join('<br>');
+                alert(errorMessages.join('\n'));
+                return false;
+            }
+            return true;
+        }
+
+        function buildTriggerSection(index, timer) {
+            const container = document.getElementById('triggersContainer');
+            if (!container) return;
+
+            const t = timer || {};
+            const timeString = typeof t.time === 'string' ? t.time : '00:00';
+            const timeParts = timeString.split(':');
+            const hour = timeParts.length === 2 ? timeParts[0] : '00';
+            const minute = timeParts.length === 2 ? timeParts[1] : '00';
+
+            const durationSeconds = typeof t.duration === 'number' ? t.duration : 0;
+            let activationDurationValue = '';
+            let activationUnit = '1000';
+            if (durationSeconds > 0) {
+                if (durationSeconds % 3600 === 0) {
+                    activationDurationValue = durationSeconds / 3600;
+                    activationUnit = '3600000';
+                } else if (durationSeconds % 60 === 0) {
+                    activationDurationValue = durationSeconds / 60;
+                    activationUnit = '60000';
+                } else {
+                    activationDurationValue = durationSeconds;
+                    activationUnit = '1000';
+                }
+            }
+
+            const delaySeconds = typeof t.delay === 'number' ? t.delay : 0;
+            let delayValue = '';
+            let delayUnit = '1000';
+            if (delaySeconds > 0) {
+                if (delaySeconds % 3600 === 0) {
+                    delayValue = delaySeconds / 3600;
+                    delayUnit = '3600000';
+                } else if (delaySeconds % 60 === 0) {
+                    delayValue = delaySeconds / 60;
+                    delayUnit = '60000';
+                } else {
+                    delayValue = delaySeconds;
+                    delayUnit = '1000';
+                }
+            }
+
+            const repetitions = typeof t.repetitions === 'number' ? t.repetitions : 0;
+
+            const html = `
+                <div class="trigger">
+                    <h2>Trigger ${index + 1}</h2>
+                    <div class="form-group">
+                        <label>Time:
+                            <input type="time" name="hour${index}" value="${hour.padStart(2, '0')}:${minute.padStart(2, '0')}" required>
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label>Activation Duration:
+                            <input type="number" name="activationDuration${index}" value="${activationDurationValue}" min="0">
+                        </label>
+                        <select name="activationDurationUnit${index}">
+                            <option value="1000" ${activationUnit === '1000' ? 'selected' : ''}>Seconds</option>
+                            <option value="60000" ${activationUnit === '60000' ? 'selected' : ''}>Minutes</option>
+                            <option value="3600000" ${activationUnit === '3600000' ? 'selected' : ''}>Hours</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Repetitions:
+                            <input type="number" name="repetitions${index}" value="${repetitions}" min="0">
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label for="delayBetweenActivations${index}">Delay Between Activations:</label>
+                        <div class="custom-number-input">
+                            <input type="number" id="delayBetweenActivations${index}" name="delayBetweenActivations${index}" min="1" value="${delayValue}">
+                            <select id="delayUnit${index}" name="delayUnit${index}">
+                                <option value="1000" ${delayUnit === '1000' ? 'selected' : ''}>Seconds</option>
+                                <option value="60000" ${delayUnit === '60000' ? 'selected' : ''}>Minutes</option>
+                                <option value="3600000" ${delayUnit === '3600000' ? 'selected' : ''}>Hours</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>`;
+
+            const wrapper = document.createElement('div');
+            wrapper.innerHTML = html;
+            container.appendChild(wrapper.firstElementChild);
+        }
+
+        function buildActiveDays(activeDays) {
+            const container = document.getElementById('activeDaysContainer');
+            if (!container) return;
+
+            const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            container.innerHTML = '';
+
+            for (let i = 0; i < 7; i++) {
+                const label = document.createElement('label');
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.name = 'day' + i;
+                if (Array.isArray(activeDays) && activeDays[i]) {
+                    checkbox.checked = true;
+                }
+                label.appendChild(checkbox);
+                label.appendChild(document.createTextNode(dayNames[i]));
+                container.appendChild(label);
+            }
+        }
+
+        async function loadInitialData() {
+            try {
+                const response = await fetch('/status.json');
+                if (!response.ok) return;
+                const data = await response.json();
+
+                const timers = Array.isArray(data.timers) ? data.timers : [];
+                const count = timers.length > 0 ? timers.length : 1;
+                for (let i = 0; i < count; i++) {
+                    buildTriggerSection(i, timers[i]);
+                }
+
+                buildActiveDays(data.activeDays);
+
+                if (data.currentTime) {
+                    const info = document.getElementById('systemInfo');
+                    if (info) {
+                        info.textContent = 'System Time: ' + data.currentTime + ' | Firmware: ' + (data.firmwareVersion || '4.0');
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to load initial trigger data:', error);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            const darkModeToggle = document.getElementById('darkModeToggle');
+            const body = document.body;
+            const darkMode = localStorage.getItem('darkMode') === 'true';
+
+            body.classList.toggle('dark-mode', darkMode);
+            if (darkModeToggle) {
+                darkModeToggle.checked = darkMode;
+                darkModeToggle.addEventListener('change', () => {
+                    body.classList.toggle('dark-mode');
+                    localStorage.setItem('darkMode', darkModeToggle.checked);
+                });
+            }
+
+            loadInitialData();
+        });
+    </script>
+</body>
+</html>

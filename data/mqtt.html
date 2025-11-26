@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>MQTT Configuration</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 10px;
+            background-color: #f4f4f4;
+            color: #333;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        body.dark-mode {
+            background-color: #121212;
+            color: #e0e0e0;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+
+        .title {
+            font-size: 24px;
+            font-weight: 700;
+            margin: 0;
+        }
+
+        .card {
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+        }
+
+        body.dark-mode .card {
+            background-color: #1e1e1e;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .card-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin: 0 0 16px 0;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 500;
+        }
+
+        .form-group input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            font-size: 14px;
+        }
+
+        body.dark-mode .form-group input[type="text"] {
+            background-color: #2c2c2c;
+            border-color: #444;
+            color: #e0e0e0;
+        }
+
+        .button-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+            margin-top: 20px;
+        }
+
+        .button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 20px;
+            background-color: #3498db;
+            color: #ffffff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            text-decoration: none;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+        }
+
+        .button:hover {
+            background-color: #2980b9;
+            transform: translateY(-1px);
+        }
+
+        .button-secondary {
+            background-color: #95a5a6;
+        }
+
+        .button-secondary:hover {
+            background-color: #7f8c8d;
+        }
+
+        #mqttStatus {
+            margin-top: 12px;
+            font-size: 14px;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: 0.4s;
+            border-radius: 34px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: #fff;
+            transition: 0.4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: #2ecc71;
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+
+        body.dark-mode input:checked + .slider {
+            background-color: #2ecc71;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1 class="title">MQTT Configuration</h1>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span>Dark Mode</span>
+                <label class="switch">
+                    <input type="checkbox" id="darkModeToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2 class="card-title">MQTT Broker IP</h2>
+            <form id="MQTTConfigForm" onsubmit="return submitMQTTConfig(event)">
+                <div class="form-group">
+                    <label for="IP">MQTT IP:</label>
+                    <input
+                        type="text"
+                        id="IP"
+                        name="IP"
+                        maxlength="15"
+                        pattern="^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"
+                        placeholder="e.g., 192.168.1.1"
+                        required
+                    >
+                </div>
+
+                <div class="button-grid">
+                    <button type="submit" class="button">Save MQTT Settings</button>
+                    <a href="/" class="button button-secondary">Back to Dashboard</a>
+                </div>
+            </form>
+            <div id="mqttStatus"></div>
+        </div>
+    </div>
+
+    <script>
+        function submitMQTTConfig(e) {
+            e.preventDefault();
+            const form = document.getElementById('MQTTConfigForm');
+            const status = document.getElementById('mqttStatus');
+            const formData = new FormData(form);
+
+            status.style.color = '';
+            status.textContent = 'Saving...';
+
+            fetch('/saveMQTT', {
+                method: 'POST',
+                body: formData
+            })
+                .then(response => response.json())
+                .then(data => {
+                    status.textContent = data.message;
+                    status.style.color = data.success ? 'green' : 'red';
+                })
+                .catch(error => {
+                    console.error('Error saving MQTT settings:', error);
+                    status.textContent = 'Error saving MQTT settings';
+                    status.style.color = 'red';
+                });
+
+            return false;
+        }
+
+        async function loadInitialMQTTIp() {
+            try {
+                const response = await fetch('/status.json');
+                if (!response.ok) return;
+                const data = await response.json();
+                if (data.mqttIp && typeof data.mqttIp === 'string') {
+                    document.getElementById('IP').value = data.mqttIp;
+                }
+            } catch (error) {
+                console.error('Failed to load initial MQTT IP:', error);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            const darkModeToggle = document.getElementById('darkModeToggle');
+            const body = document.body;
+            const darkMode = localStorage.getItem('darkMode') === 'true';
+
+            body.classList.toggle('dark-mode', darkMode);
+            if (darkModeToggle) {
+                darkModeToggle.checked = darkMode;
+                darkModeToggle.addEventListener('change', () => {
+                    body.classList.toggle('dark-mode');
+                    localStorage.setItem('darkMode', darkModeToggle.checked);
+                });
+            }
+
+            loadInitialMQTTIp();
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>Clock Setup</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 10px;
+            background-color: #f4f4f4;
+            color: #333;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        body.dark-mode {
+            background-color: #121212;
+            color: #e0e0e0;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+
+        .title {
+            font-size: 24px;
+            font-weight: 700;
+            margin: 0;
+        }
+
+        .card {
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+        }
+
+        body.dark-mode .card {
+            background-color: #1e1e1e;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .card-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin: 0 0 16px 0;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 8px;
+        }
+
+        .time-update-form {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 16px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .form-group label {
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .form-group input,
+        .form-group select {
+            padding: 10px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            font-size: 14px;
+        }
+
+        body.dark-mode .form-group input,
+        body.dark-mode .form-group select {
+            background-color: #2c2c2c;
+            border-color: #444;
+            color: #e0e0e0;
+        }
+
+        .button-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+            margin-top: 20px;
+        }
+
+        .button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 20px;
+            background-color: #3498db;
+            color: #ffffff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            text-decoration: none;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+        }
+
+        .button:hover {
+            background-color: #2980b9;
+            transform: translateY(-1px);
+        }
+
+        .button-secondary {
+            background-color: #95a5a6;
+        }
+
+        .button-secondary:hover {
+            background-color: #7f8c8d;
+        }
+
+        .submit-button {
+            width: 100%;
+        }
+
+        .error-message {
+            grid-column: 1 / -1;
+            color: #e74c3c;
+            font-size: 14px;
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 4px;
+            background-color: rgba(231, 76, 60, 0.1);
+        }
+
+        body.dark-mode .error-message {
+            background-color: rgba(231, 76, 60, 0.2);
+        }
+
+        .success-message {
+            margin: 10px 0 20px 0;
+            padding: 10px;
+            border-radius: 4px;
+            background-color: #d4edda;
+            color: #155724;
+        }
+
+        body.dark-mode .success-message {
+            background-color: #1e4a2c;
+            color: #d4edda;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: 0.4s;
+            border-radius: 34px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: #fff;
+            transition: 0.4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: #2ecc71;
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+
+        body.dark-mode input:checked + .slider {
+            background-color: #2ecc71;
+        }
+
+        @media (max-width: 600px) {
+            .card {
+                padding: 15px;
+            }
+
+            .title {
+                font-size: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1 class="title">Clock Setup</h1>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span>Dark Mode</span>
+                <label class="switch">
+                    <input type="checkbox" id="darkModeToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+
+        <div id="successMessage" class="success-message" style="display: none;"></div>
+
+        <div class="card">
+            <h2 class="card-title">Update System Clock</h2>
+            <form id="updateTimeForm" class="time-update-form" action="/update-time" method="POST" onsubmit="return validateForm()">
+                <div class="form-group" style="grid-column: 1 / -1; flex-direction: row; align-items: center;">
+                    <label for="useDST" style="margin-right: 10px;">Enable Daylight Saving Time:</label>
+                    <input type="checkbox" id="useDST" name="useDST" value="1">
+                </div>
+
+                <div class="form-group">
+                    <label for="timezone">Timezone:</label>
+                    <select id="timezone" name="timezone" required>
+                        <option value="-12">UTC-12 (Baker Island)</option>
+                        <option value="-11">UTC-11 (American Samoa)</option>
+                        <option value="-10">UTC-10 (Hawaii)</option>
+                        <option value="-9">UTC-9 (Alaska)</option>
+                        <option value="-8">UTC-8 (Los Angeles)</option>
+                        <option value="-7">UTC-7 (Denver)</option>
+                        <option value="-6">UTC-6 (Chicago)</option>
+                        <option value="-5">UTC-5 (New York)</option>
+                        <option value="-4">UTC-4 (Santiago)</option>
+                        <option value="-3">UTC-3 (São Paulo)</option>
+                        <option value="-2">UTC-2 (South Georgia)</option>
+                        <option value="-1">UTC-1 (Azores)</option>
+                        <option value="0">UTC+0 (London)</option>
+                        <option value="1">UTC+1 (Paris, Berlin)</option>
+                        <option value="2">UTC+2 (Cairo, Kiev)</option>
+                        <option value="3">UTC+3 (Moscow)</option>
+                        <option value="4">UTC+4 (Dubai)</option>
+                        <option value="5">UTC+5 (Karachi)</option>
+                        <option value="6">UTC+6 (Dhaka)</option>
+                        <option value="7">UTC+7 (Bangkok)</option>
+                        <option value="8">UTC+8 (Singapore, Beijing)</option>
+                        <option value="9">UTC+9 (Tokyo)</option>
+                        <option value="10">UTC+10 (Sydney)</option>
+                        <option value="11">UTC+11 (Solomon Islands)</option>
+                        <option value="12">UTC+12 (Auckland)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="year">Year:</label>
+                    <input type="number" id="year" name="year" placeholder="Year" min="2024" max="2099" required>
+                </div>
+                <div class="form-group">
+                    <label for="month">Month:</label>
+                    <input type="number" id="month" name="month" placeholder="Month" min="1" max="12" required>
+                </div>
+                <div class="form-group">
+                    <label for="day">Day:</label>
+                    <input type="number" id="day" name="day" placeholder="Day" min="1" max="31" required>
+                </div>
+                <div class="form-group">
+                    <label for="hour">Hour:</label>
+                    <input type="number" id="hour" name="hour" placeholder="Hour" min="0" max="23" required>
+                </div>
+                <div class="form-group">
+                    <label for="minute">Minute:</label>
+                    <input type="number" id="minute" name="minute" placeholder="Minute" min="0" max="59" required>
+                </div>
+                <div class="form-group">
+                    <label for="second">Second:</label>
+                    <input type="number" id="second" name="second" placeholder="Second" min="0" max="59" required>
+                </div>
+
+                <div class="button-grid">
+                    <button type="submit" class="button submit-button">Update Clock</button>
+                    <a href="/" class="button button-secondary">Back to Dashboard</a>
+                </div>
+
+                <div id="errorMessage" class="error-message" style="display: none;"></div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function validateForm() {
+            let errorMessage = '';
+            const year = parseInt(document.getElementById('year').value, 10);
+            const month = parseInt(document.getElementById('month').value, 10);
+            const day = parseInt(document.getElementById('day').value, 10);
+            const hour = parseInt(document.getElementById('hour').value, 10);
+            const minute = parseInt(document.getElementById('minute').value, 10);
+            const second = parseInt(document.getElementById('second').value, 10);
+
+            if (isNaN(year) || isNaN(month) || isNaN(day) || isNaN(hour) || isNaN(minute) || isNaN(second)) {
+                errorMessage = 'Please enter valid numeric values for all fields.';
+            } else if (year < 2000 || year > 2099) {
+                errorMessage = 'Invalid year. Please enter a year between 2000 and 2099.';
+            } else if (month < 1 || month > 12) {
+                errorMessage = 'Invalid month. Please enter a month between 1 and 12.';
+            } else if (day < 1 || day > getDaysInMonth(month, year)) {
+                errorMessage = 'Invalid day for the selected month and year.';
+            } else if (hour < 0 || hour > 23) {
+                errorMessage = 'Invalid hour. Please enter an hour between 0 and 23.';
+            } else if (minute < 0 || minute > 59) {
+                errorMessage = 'Invalid minute. Please enter a minute between 0 and 59.';
+            } else if (second < 0 || second > 59) {
+                errorMessage = 'Invalid second. Please enter a second between 0 and 59.';
+            }
+
+            const errorElement = document.getElementById('errorMessage');
+            const submitButton = document.querySelector('.submit-button');
+
+            if (errorMessage) {
+                if (errorElement) {
+                    errorElement.innerHTML = errorMessage;
+                    errorElement.style.display = 'block';
+                }
+                if (submitButton) submitButton.disabled = false;
+                return false;
+            }
+
+            if (errorElement) {
+                errorElement.innerHTML = 'Updating clock...';
+                errorElement.style.display = 'block';
+            }
+            if (submitButton) submitButton.disabled = true;
+
+            const form = document.getElementById('updateTimeForm');
+            if (!form) {
+                if (errorElement) errorElement.innerHTML = 'Form not found.';
+                if (submitButton) submitButton.disabled = false;
+                return false;
+            }
+
+            const formData = new FormData(form);
+
+            fetch('/update-time', {
+                method: 'POST',
+                body: formData,
+                signal: (AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined)
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Failed to update clock: ' + response.statusText);
+                    }
+                    return response.text();
+                })
+                .then(() => {
+                    window.location.href = '/rtc-update?success=true';
+                })
+                .catch(error => {
+                    if (errorElement) errorElement.innerHTML = error.message;
+                    if (submitButton) submitButton.disabled = false;
+                });
+
+            return false;
+        }
+
+        function getDaysInMonth(month, year) {
+            if (month === 2) {
+                if ((year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0)) {
+                    return 29;
+                }
+                return 28;
+            }
+            const daysInMonth = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+            return daysInMonth[month - 1];
+        }
+
+        async function loadInitialTimeSettings() {
+            try {
+                const response = await fetch('/status.json');
+                if (!response.ok) return;
+                const data = await response.json();
+
+                if (typeof data.timezoneOffset === 'number') {
+                    document.getElementById('timezone').value = String(data.timezoneOffset);
+                }
+                if (typeof data.dstEnabled === 'boolean') {
+                    document.getElementById('useDST').checked = data.dstEnabled;
+                }
+                if (typeof data.currentTime === 'string') {
+                    const parts = data.currentTime.split(' ');
+                    if (parts.length === 2) {
+                        const dateParts = parts[0].split('/');
+                        const timeParts = parts[1].split(':');
+                        if (dateParts.length === 3 && timeParts.length === 3) {
+                            document.getElementById('year').value = dateParts[0];
+                            document.getElementById('month').value = dateParts[1];
+                            document.getElementById('day').value = dateParts[2];
+                            document.getElementById('hour').value = timeParts[0];
+                            document.getElementById('minute').value = timeParts[1];
+                            document.getElementById('second').value = timeParts[2];
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to load initial time settings:', error);
+            }
+        }
+
+        function initSuccessMessage() {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('success') === 'true') {
+                const el = document.getElementById('successMessage');
+                if (el) {
+                    el.textContent = 'System clock updated successfully!';
+                    el.style.display = 'block';
+                }
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            const darkModeToggle = document.getElementById('darkModeToggle');
+            const body = document.body;
+            const darkMode = localStorage.getItem('darkMode') === 'true';
+
+            body.classList.toggle('dark-mode', darkMode);
+            if (darkModeToggle) {
+                darkModeToggle.checked = darkMode;
+                darkModeToggle.addEventListener('change', () => {
+                    body.classList.toggle('dark-mode');
+                    localStorage.setItem('darkMode', darkModeToggle.checked);
+                });
+            }
+
+            initSuccessMessage();
+            loadInitialTimeSettings();
+        });
+    </script>
+</body>
+</html>

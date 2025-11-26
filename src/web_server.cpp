@@ -21,6 +21,7 @@ void handleCurrentTime();
 void handleFirmwareUpdate();
 void handleFirmwarePage();
 void handleStatusJson();
+void handleLogsJson();
 
 String generateHTMLHeader();
 String generateCSS();
@@ -93,12 +94,13 @@ void web_server_init() {
     server.on("/rtc-update", HTTP_GET, handleRTCUpdate);
     server.on("/update-time", HTTP_POST, handleTimeUpdate);
     server.on("/mqtt", HTTP_GET, []() {
-        
-            String html = generateHTMLHeader();
-            html += generateMQTTConfigForm();
-            html += "</body></html>";
-            server.send(200, "text/html", html);
-        
+        File file = LittleFS.open("/mqtt.html", "r");
+        if (!file) {
+            server.send(404, "text/plain", "MQTT config page not found");
+            return;
+        }
+        server.streamFile(file, "text/html");
+        file.close();
     });
     server.on("/saveMQTT", HTTP_POST, []() {
         if (!server.hasArg("IP")) {
@@ -132,12 +134,13 @@ void web_server_init() {
     ESP.restart();
     }, handleFirmwareUpdate);
     server.on("/wifi-config", HTTP_GET, []() {
-        
-            String html = generateHTMLHeader();
-            html += generateWiFiConfigForm();
-            html += "</body></html>";
-            server.send(200, "text/html", html);
-        
+        File file = LittleFS.open("/wifi.html", "r");
+        if (!file) {
+            server.send(404, "text/plain", "WiFi config page not found");
+            return;
+        }
+        server.streamFile(file, "text/html");
+        file.close();
     });
     server.on("/saveWiFi", HTTP_POST, []() {
         
@@ -171,8 +174,15 @@ void web_server_init() {
         ESP.restart();
     });
     server.on("/log", HTTP_GET, []() {
-    server.send(200, "text/html", generateLogPage());
+        File file = LittleFS.open("/log.html", "r");
+        if (!file) {
+            server.send(404, "text/plain", "Log page not found");
+            return;
+        }
+        server.streamFile(file, "text/html");
+        file.close();
     });
+    server.on("/logs.json", HTTP_GET, handleLogsJson);
     server.on("/current-time", HTTP_GET, handleCurrentTime);
     server.on("/getBypassStatus", HTTP_GET, []() {
     server.send(200, "application/json", String("{\"bypassMode\":") + (bypassModeEnabled ? "true" : "false") + "}");
@@ -254,247 +264,14 @@ void handleForm() {
 }
 
 void handleInput() {
-    server.setContentLength(CONTENT_LENGTH_UNKNOWN);
-    server.send(200, "text/html", "");
-  
-    sendChunked(F(
-      "<!DOCTYPE html>"
-      "<html lang='en'>"
-      "<head>"
-      "<meta charset='UTF-8'>"
-      "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
-      "<title>Trigger Settings</title>"
-      "<style>"
-      "  body {"
-      "  font-family: Arial, sans-serif;"
-      "  line-height: 1.6;"
-      "  margin: 0;"
-      "  padding: 20px;"
-      "  background-color: #f4f4f4;"
-      "  color: #333;"
-      "  transition: background-color 0.3s, color 0.3s;"
-      "  font-size: 14px;"
-      "}"
-      ".container {"
-      "  max-width: 800px;"
-      "  margin: 0 auto;"
-      "}"
-      "h1 {"
-      "  color: #2c3e50;"
-      "  margin-bottom: 30px;"
-      "  border-bottom: 2px solid #3498db;"
-      "  padding-bottom: 10px;"
-      "}"
-      ".trigger {"
-      "  background-color: #fff;"
-      "  border-radius: 8px;"
-      "  box-shadow: 0 2px 4px rgba(0,0,0,0.1);"
-      "  padding: 20px;"
-      "  margin-bottom: 20px;"
-      "}"
-      ".form-group {"
-      "  margin-bottom: 15px;"
-      "}"
-      "label {"
-      "  display: block;"
-      "  margin-bottom: 8px;"
-      "  font-weight: 500;"
-      "}"
-      "input, select {"
-      "  width: 100%;"
-      "  padding: 10px;"
-      "  border: 1px solid #ddd;"
-      "  border-radius: 4px;"
-      "  margin: 0px 0;"
-      "  box-sizing: border-box;"
-      "}"
-      "input[type='checkbox'] {"
-      "  width: auto;"
-      "  margin-right: 10px;"
-      "  cursor: pointer;"
-      "  height: 20px;"
-      "  width: 20px;"
-      "}"
-      ".button-section {"
-      "  display: flex;"
-      "  gap: 10px;"
-      "  margin: 20px 0;"
-      "}"
-      ".button {"
-      "  flex: 1;"
-      "  padding: 12px 20px;"
-      "  background-color: #3498db;"
-      "  color: white;"
-      "  border: none;"
-      "  border-radius: 4px;"
-      "  cursor: pointer;"
-      "  transition: background-color 0.3s;"
-      "}"
-      ".button:hover {"
-      "  background-color: #2980b9;"
-      "}"
-      ".error {"
-      "  color: #e74c3c;"
-      "  background-color: rgba(231, 76, 60, 0.1);"
-      "  padding: 10px;"
-      "  border-radius: 4px;"
-      "  margin: 10px 0;"
-      "}"
-      ".button-grid {"
-      "   display: grid;"
-      "   grid-template-columns: repeat(3, 1fr);"
-      "   gap: 10px;"
-      "    margin-top: 20px;"
-      "}"
-      "body.dark-mode {"
-      "  background-color: #1a1a1a;"
-      "  color: #f4f4f4;"
-      "}"
-      "body.dark-mode h1 {"
-      "  color: #ecf0f1;"
-      "}"
-      "body.dark-mode .trigger {"
-      "  background-color: #2c2c2c;"
-      "  box-shadow: 0 2px 4px rgba(0,0,0,0.2);"
-      "}"
-      "body.dark-mode input, body.dark-mode select , body.dark-mode button {"
-      "  background-color: #333;"
-      "  border-color: #444;"
-      "  color: #f4f4f4;"
-      "}"
-      "body.dark-mode .error {"
-      "  background-color: rgba(231, 76, 60, 0.2);"
-      "}"
-      "@media (max-width: 768px) {"
-      "  .container {"
-      "    padding: 10px;"
-      "  }"
-      "  .trigger {"
-      "    padding: 15px;"
-      "  }"
-      "  .button-section {"
-      "    flex-direction: column;"
-      "  }"
-      "  .button {"
-      "    width: 100%;"
-      "    margin: 5px 0;"
-      "  }"
-      "  input, select {"
-      "    font-size: 16px;"
-      "  }"
-      "}"
-      "</style>"
-      "</head>"
-      "<body>"
-      "<div class='container'>"
-      "<h1>Trigger Settings</h1>"
-      "<div class='button-section' style='margin-bottom: 20px;'>"
-      "<div style='display: flex; align-items: center; gap: 8px;'>"
-      "<span>Dark Mode</span>"
-      "<label class='switch'>"
-      "<input type='checkbox' id='darkModeToggle'>"
-      "<span class='slider'></span>"
-      "</label>"
-      "</div>"
-      "</div>"
-      "<form action='/submit' method='POST' id='triggerForm' onsubmit='return validateForm()'>"
-  ));
-  
-    for (int i = 0; i < safeNumberOfTimers(); i++) {
-      sendTriggerSection(i);
-      yield();
+    File file = LittleFS.open("/triggerschedules.html", "r");
+    if (!file) {
+        server.send(404, "text/plain", "Trigger schedules page not found");
+        return;
     }
-  
-    sendActiveDaysSection();
-  
-    sendChunked(F(
-      "<div class='button-grid'>"
-      "<input type='submit' class='button' value='Save'>"
-      "<button type='button' class='button' onclick='clearForm()'>Clear All</button>"
-      "</div>"
-      "</form>"
-      "<div id='errorMessages' class='error'></div>"
-  ));
-  
-    sendSystemInfo();
-  
-    sendChunked(F(
-        "<script>"
-        "function clearForm() {"
-        "  var form = document.getElementById('triggerForm');"
-        "  var inputs = form.getElementsByTagName('input');"
-        "  for (var i = 0; i < inputs.length; i++) {"
-        "    if (inputs[i].type == 'text' || inputs[i].type == 'number' || inputs[i].type == 'time') {"
-        "      inputs[i].value = '';"
-        "    } else if (inputs[i].type == 'checkbox') {"
-        "      inputs[i].checked = false;"
-        "    }"
-        "  }"
-        "  var selects = form.getElementsByTagName('select');"
-        "  for (var i = 0; i < selects.length; i++) {"
-        "    selects[i].selectedIndex = 0;"
-        "  }"
-        "}"
-        "function validateForm() {"
-        "  var times = {};"
-        "  var errorMessages = [];"
-        "  var inputs = document.getElementsByTagName('input');"
-        "  var selects = document.getElementsByTagName('select');"
-        "  for (var i = 0; i < inputs.length; i++) {"
-        "    if (inputs[i].type == 'time' && inputs[i].name.startsWith('hour')) {"
-        "      var time = inputs[i].value;"
-        "      if (time && time in times) {"
-        "        errorMessages.push('Multiple timers set for ' + time + '. Please choose different times.');"
-        "      } else if (time) {"
-        "        times[time] = true;"
-        "      }"
-        "    } else if (inputs[i].type == 'number' && inputs[i].name.startsWith('delayBetweenActivations')) {"
-        "      var timerIndex = inputs[i].name.match(/\\d+/)[0];"
-        "      var delayValue = parseInt(inputs[i].value);"
-        "      var delayUnitSelect = document.getElementById('delayUnit' + timerIndex);"
-        "      var delayUnit = parseInt(delayUnitSelect.value);"
-        "      var delayInMs = delayValue * delayUnit;"
-        "      if (isNaN(delayValue) || delayInMs < 60000) {"
-        "        errorMessages.push('Delay Between Activations for Trigger ' + (parseInt(timerIndex) + 1) + ' must be at least 60 seconds.');"
-        "      }"
-        "    } else if (inputs[i].type == 'number' && inputs[i].name.startsWith('activationDuration')) {"
-        "      var activationDuration = parseInt(inputs[i].value);"
-        "      if (isNaN(activationDuration) || activationDuration <= 0) {"
-        "        var timerIndex = inputs[i].name.match(/\\d+/)[0];"
-        "        errorMessages.push('Activation Duration for Trigger ' + (parseInt(timerIndex) + 1) + ' must be greater than zero.');"
-        "      }"
-        "    }"
-        "  }"
-        "  if (errorMessages.length > 0) {"
-        "    document.getElementById('errorMessages').innerHTML = errorMessages.join('<br>');"
-        "    alert(errorMessages.join('\\n'));"
-        "    return false;"
-        "  }"
-        "  return true;"
-        "}"
-        "document.addEventListener('DOMContentLoaded', function() {"
-        "    const darkModeToggle = document.getElementById('darkModeToggle');"
-        "    const body = document.body;"
-        "    const darkMode = localStorage.getItem('darkMode') === 'true';"
-        "    body.classList.toggle('dark-mode', darkMode);"
-        "    if(darkModeToggle) { "
-        "        darkModeToggle.checked = darkMode;"
-        "        darkModeToggle.addEventListener('change', () => {"
-        "            body.classList.toggle('dark-mode');"
-        "            localStorage.setItem('darkMode', darkModeToggle.checked);"
-        "        });"
-        "    }"
-        "});"
-        "</script>"
-        "</body>"
-        "</html>"
-      ));
-  
-    sendChunked(F("<div>Some large HTML content</div>"));
-    yield();
-  
-    server.client().stop();
-  }
+    server.streamFile(file, "text/html");
+    file.close();
+}
 void handleSetTimers() {
   if (server.hasArg("count")) {
     int newCount = server.arg("count").toInt();
@@ -515,139 +292,23 @@ void handleSetTimers() {
 }
 
 void handleTimerConfig() {
-  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
-  server.send(200, "text/html", "");
-  
-  server.sendContent(generateHTMLHeader());
-  
-  String configContent = R"=====(
-    <div class="container">
-        <div class="card">
-            <div class="card-header">
-                <h2 class="card-title">Trigger count</h2>
-            </div>
-            <div class="info-grid">
-                <div class="info-item">
-                    <span class="info-label">Number of Triggers:</span>
-                    <div class="input-group">
-                        <input type="number" 
-                               id="timerCount" 
-                               name="count" 
-                               min="1" 
-                               max="6" 
-                               value=")=====";
-  configContent += String(safeNumberOfTimers());
-  configContent += R"=====(">
-                        <small class="helper-text">Choose between 1-6 triggers</small>
-                    </div>
-                </div>
-            </div>
-
-            <div id="statusMessage" class="status-message" style="display: none;"></div>
-
-            <div class="button-grid">
-                <button type="button" onclick="updateTimers()" class="button">Update</button>
-            </div>
-        </div>
-    </div>
-
-    <style>
-        .input-group {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        .helper-text {
-            color: #666;
-            font-size: 0.9em;
-        }
-        .status-message {
-            margin: 16px 0;
-            padding: 12px;
-            border-radius: 4px;
-            text-align: center;
-        }
-        .status-message.success {
-            background-color: #d4edda;
-            color: #155724;
-        }
-        .status-message.error {
-            background-color: #f8d7da;
-            color: #721c24;
-        }
-        .button-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-            gap: 12px;
-            margin-top: 20px;
-        }
-        body.dark-mode .helper-text {
-            color: #999;
-        }
-        body.dark-mode .status-message.success {
-            background-color: #1e4a2c;
-            color: #d4edda;
-        }
-        body.dark-mode .status-message.error {
-            background-color: #4a1e1e;
-            color: #f8d7da;
-        }
-    </style>
-
-    <script>
-        function updateTimers() {
-            const count = document.getElementById('timerCount').value;
-            const statusMessage = document.getElementById('statusMessage');
-            
-            if (count < 1 || count > 6) {
-                showStatus('Please enter a number between 1 and 6', 'error');
-                return;
-            }
-
-            fetch(`/setTimers?count=${count}`)
-                .then(response => response.text())
-                .then(data => {
-                    showStatus('Timer configuration updated successfully!', 'success');
-                    setTimeout(() => {
-                        window.location.href = '/';
-                    }, 1500);
-                })
-                .catch(error => {
-                    showStatus('Failed to update timer configuration', 'error');
-                });
-        }
-
-        function showStatus(message, type) {
-            const statusMessage = document.getElementById('statusMessage');
-            statusMessage.textContent = message;
-            statusMessage.className = 'status-message ' + type;
-            statusMessage.style.display = 'block';
-        }
-
-        // Initialize dark mode
-        document.addEventListener('DOMContentLoaded', function() {
-            if (localStorage.getItem('darkMode') === 'true') {
-                document.body.classList.add('dark-mode');
-            }
-        });
-    </script>
-    )=====";
-
-  server.sendContent(configContent);
-  server.client().stop();
+  File file = LittleFS.open("/timerConfig.html", "r");
+  if (!file) {
+      server.send(404, "text/plain", "Timer configuration page not found");
+      return;
+  }
+  server.streamFile(file, "text/html");
+  file.close();
 }
 
 void handleRTCUpdate() {
-    
-    String html = generateHTMLHeader();
-    html += "<h2>Clock Setup</h2>";
-    if (server.hasArg("success")) {
-        html += "<p style='color: green;'>System clock updated successfully!</p>";
+    File file = LittleFS.open("/clock.html", "r");
+    if (!file) {
+        server.send(404, "text/plain", "Clock page not found");
+        return;
     }
-    html += generateUpdateTimeForm();
-    html += "</body></html>";
-    server.send(200, "text/html", html);
-   
+    server.streamFile(file, "text/html");
+    file.close();
 }
 
 void handleTimeUpdate() {
@@ -700,6 +361,32 @@ void handleCurrentTime() {
 
         server.send(200, "text/plain", String(datestring));
     
+}
+
+void handleLogsJson() {
+    JsonDocument doc;
+    JsonArray logs = doc.to<JsonArray>();
+
+    for (int i = logIndex - 1; i >= 0; i--) {
+        if (relayLog[i].unix_time == 0) {
+            continue;
+        }
+
+        DateTime logTime(relayLog[i].unix_time);
+        char datestring[20];
+        snprintf(datestring, sizeof(datestring), "%04u/%02u/%02u %02u:%02u:%02u",
+                 logTime.year(), logTime.month(), logTime.day(),
+                 logTime.hour(), logTime.minute(), logTime.second());
+
+        JsonObject log = logs.add<JsonObject>();
+        log["timestamp"] = datestring;
+        log["state"] = relayLog[i].relayState ? "ON" : "OFF";
+        log["unix"] = relayLog[i].unix_time;
+    }
+
+    String jsonString;
+    serializeJson(doc, jsonString);
+    server.send(200, "application/json", jsonString);
 }
 
 void handleFirmwarePage() {
@@ -831,33 +518,75 @@ String generateDashboardGrid() {
 }
 
 String generateTriggerCard(int index) {
-  String card = "<div class='card'>";
-  card += "<h2>Trigger " + String(index + 1) + "</h2>";
-  card += "<div class='info-grid'>";
-
-  // Format time with leading zeros
-  String formattedTime = (triggerDays[index].hour < 10 ? "0" : "") + String(triggerDays[index].hour) + ":";
-  formattedTime += (triggerDays[index].minute < 10 ? "0" : "") + String(triggerDays[index].minute);
-
-  card += generateInfoItem("Time", formattedTime);
-  card += generateInfoItem("Activation Duration", String(triggerDays[index].activationDuration / 1000) + " seconds");
-  
-  // New code to display correct delay between activations
-  String delayString;
-  if (triggerDays[index].delayBetweenActivations % 3600000 == 0) {
-    delayString = String(triggerDays[index].delayBetweenActivations / 3600000) + " hours";
-  } else if (triggerDays[index].delayBetweenActivations % 60000 == 0) {
-    delayString = String(triggerDays[index].delayBetweenActivations / 60000) + " minutes";
-  } else {
-    delayString = String(triggerDays[index].delayBetweenActivations / 1000) + " seconds";
+    String card = "<div class='card trigger-card'>";
+    
+    // Header with title and activation badge
+    card += "<div class='card-header'>";
+    card += "<h2>Trigger " + String(index + 1) + "</h2>";
+    card += "<div class='activation-badge'>";
+    card += "<span class='activation-count'>" + String(triggerStates[index].activations) + "</span>";
+    card += "<span class='activation-label'>runs today</span>";
+    card += "</div>";
+    card += "</div>";
+    
+    // Hero time display
+    String formattedTime = (triggerDays[index].hour < 10 ? "0" : "") + String(triggerDays[index].hour) + ":";
+    formattedTime += (triggerDays[index].minute < 10 ? "0" : "") + String(triggerDays[index].minute);
+    
+    card += "<div class='hero-time'>" + formattedTime + "</div>";
+    
+    // Visual flow section
+    card += "<div class='timing-flow'>";
+    
+    // Time icon and label
+    card += "<div class='flow-item'>";
+    card += "<div class='flow-icon'>🕐</div>";
+    card += "<div class='flow-label'>Trigger Time</div>";
+    card += "</div>";
+    
+    // Arrow
+    card += "<div class='flow-arrow'>→</div>";
+    
+    // Delay
+    String delayString;
+    unsigned long delayMs = triggerDays[index].delayBetweenActivations;
+    if (delayMs % 3600000 == 0) {
+      delayString = String(delayMs / 3600000) + "h";
+    } else if (delayMs % 60000 == 0) {
+      delayString = String(delayMs / 60000) + "m";
+    } else {
+      delayString = String(delayMs / 1000) + "s";
+    }
+    
+    card += "<div class='flow-item'>";
+    card += "<div class='flow-icon'>⏳</div>";
+    card += "<div class='flow-value'>" + delayString + "</div>";
+    card += "<div class='flow-label'>Delay</div>";
+    card += "</div>";
+    
+    // Arrow
+    card += "<div class='flow-arrow'>→</div>";
+    
+    // Duration
+    String durationString = String(triggerDays[index].activationDuration / 1000) + "s";
+    
+    card += "<div class='flow-item'>";
+    card += "<div class='flow-icon'>▶️</div>";
+    card += "<div class='flow-value'>" + durationString + "</div>";
+    card += "<div class='flow-label'>Duration</div>";
+    card += "</div>";
+    
+    card += "</div>"; // End timing-flow
+    
+    // Status section
+    card += "<div class='status-section'>";
+    card += "<span class='status-label'>Repeats:</span>";
+    card += "<span class='status-value'>" + String(triggerDays[index].repetitions) + " times</span>";
+    card += "</div>";
+    
+    card += "</div>"; // End trigger-card
+    return card;
   }
-  card += generateInfoItem("Delay Between Activations", delayString);
-  
-  card += generateInfoItem("Repetitions", String(triggerDays[index].repetitions));
-  card += generateInfoItem("Activations", String(triggerStates[index].activations));
-  card += "</div></div>";
-  return card;
-}
 
 String generateCSS() {
   return R"=====(
@@ -1090,6 +819,125 @@ String generateCSS() {
     input:checked + .slider:before {
         transform: translateX(26px);
     }
+        /* Enhanced Trigger Card Styles */
+    .trigger-card {
+        position: relative;
+        padding: 20px;
+    }
+    
+    .trigger-card .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+    }
+    
+    .trigger-card h2 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 600;
+        color: #2c3e50;
+    }
+    
+    .activation-badge {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        background: #e8f5e8;
+        border: 1px solid #4caf50;
+        border-radius: 12px;
+        padding: 4px 8px;
+        font-size: 12px;
+    }
+    
+    .activation-count {
+        font-weight: 600;
+        color: #2e7d32;
+    }
+    
+    .activation-label {
+        color: #4caf50;
+    }
+    
+    .hero-time {
+        font-size: 2.5em;
+        font-weight: 700;
+        text-align: center;
+        color: #3498db;
+        margin: 15px 0;
+        font-family: 'Courier New', monospace;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    }
+    
+    .timing-flow {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        margin: 20px 0;
+        padding: 15px;
+        background: rgba(52, 152, 219, 0.05);
+        border-radius: 8px;
+        flex-wrap: wrap;
+    }
+    
+    .flow-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        min-width: 60px;
+    }
+    
+    .flow-icon {
+        font-size: 24px;
+        margin-bottom: 2px;
+    }
+    
+    .flow-value {
+        font-size: 16px;
+        font-weight: 600;
+        color: #2c3e50;
+    }
+    
+    .flow-label {
+        font-size: 11px;
+        color: #888;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    
+    .flow-arrow {
+        font-size: 18px;
+        color: #95a5a6;
+        margin: 0 4px;
+    }
+    
+    .status-section {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 8px;
+        margin-top: 15px;
+        padding-top: 10px;
+        border-top: 1px solid rgba(0, 0, 0, 0.1);
+    }
+    
+    .status-label {
+        font-size: 13px;
+        color: #888;
+        font-weight: 500;
+    }
+    
+    .status-value {
+        font-size: 14px;
+        font-weight: 600;
+        color: #2c3e50;
+    }
+    
     /* Dark Mode Styles */
     body.dark-mode {
     background-color: #121212;
@@ -1209,6 +1057,48 @@ String generateCSS() {
         position: fixed;
         top: 20px;
         right: 20px;
+    }
+        body.dark-mode .trigger-card h2 {
+        color: #ecf0f1;
+    }
+    
+    body.dark-mode .activation-badge {
+        background: #1b5e20;
+        border-color: #4caf50;
+    }
+    
+    body.dark-mode .activation-count {
+        color: #81c784;
+    }
+    
+    body.dark-mode .activation-label {
+        color: #4caf50;
+    }
+    
+    body.dark-mode .hero-time {
+        color: #5dade2;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    }
+    
+    body.dark-mode .timing-flow {
+        background: rgba(93, 173, 226, 0.1);
+    }
+    
+    body.dark-mode .flow-value {
+        color: #ecf0f1;
+    }
+    
+    body.dark-mode .flow-label {
+        color: #95a5a6;
+    }
+    
+    body.dark-mode .status-label {
+        color: #95a5a6;
+    }
+    
+    body.dark-mode .status-value {
+        color: #ecf0f1;
+    }
     /* Mobile Responsive Styles */
     @media (max-width: 600px) {
         .time-update-card {
@@ -1233,6 +1123,22 @@ String generateCSS() {
         .back-button-icon {
             top: 15px;
             right: 15px;
+        }
+            .hero-time {
+            font-size: 2em;
+        }
+        
+        .timing-flow {
+            gap: 6px;
+            padding: 12px;
+        }
+        
+        .flow-item {
+            min-width: 50px;
+        }
+        
+        .flow-icon {
+            font-size: 20px;
         }
     }
   )=====";
@@ -1710,6 +1616,9 @@ void handleStatusJson() {
     doc["apIp"] = WiFi.softAPIP().toString();
     doc["mqttIp"] = mqttServer;
     doc["firmwareVersion"] = "4.0";
+    doc["timezoneOffset"] = rtc_get_timezone_offset();
+    doc["dstEnabled"] = rtc_is_dst_enabled();
+    doc["rtcOk"] = rtc_is_ok();
     
     // --- Active Days Array ---
     JsonArray daysArray = doc["activeDays"].to<JsonArray>();
