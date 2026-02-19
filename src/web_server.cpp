@@ -1139,7 +1139,7 @@ String generateCSS() {
         
         .flow-icon {
             font-size: 20px;
-        }
+        }`
     }
   )=====";
 }
