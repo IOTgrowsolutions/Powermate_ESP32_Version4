@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Irrigation Calculator</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        :root {
+            --primary-color: #3498db;
+            --danger-color: #e74c3c;
+            --success-color: #2ecc71;
+            --border-radius: 8px;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f4f4;
+            color: #333;
+            transition: background-color 0.3s, color 0.3s;
+        }
+        body.dark-mode { background-color: #121212; color: #e0e0e0; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+        .title { font-size: 24px; font-weight: bold; margin: 0; }
+        .card { background-color: white; border-radius: var(--border-radius); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); padding: 20px; margin-top: 20px; }
+        .dark-mode .card { background-color: #1e1e1e; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); }
+        .input-group { margin-bottom: 15px; }
+        .input-group label { display: block; margin-bottom: 5px; font-weight: bold; }
+        .input-group input, .input-group select { width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #ccc; box-sizing: border-box; }
+        .dark-mode .input-group input, .dark-mode .input-group select { background-color: #2c2c2c; border-color: #444; color: #e0e0e0; }
+        .helper-text { font-size: 0.9em; color: #666; }
+        .dark-mode .helper-text { color: #999; }
+        #advanced-settings { display: none; border-top: 2px solid #eee; margin-top: 20px; padding-top: 20px; }
+        .dark-mode #advanced-settings { border-top-color: #333; }
+        #results-section { background-color: #f4f8ff; border: 1px solid #d1e3ff; }
+        .dark-mode #results-section { background-color: #2a2a3a; border-color: #4a4a6a; }
+        button, .button { background-color: var(--primary-color); color: white; padding: 10px 15px; border: none; border-radius: 5px; cursor: pointer; font-size: 1em; text-decoration: none; display: inline-block; text-align: center; }
+        #toggle-advanced { background: none; border: none; color: #007bff; text-decoration: underline; cursor: pointer; padding: 0; }
+        .dark-mode #toggle-advanced { color: #3498db; }
+        #applyButton { background-color: var(--success-color); margin-top: 15px; width: 100%; }
+        #statusMessage { text-align: center; margin-top: 10px; font-weight: bold; }
+        .switch { position: relative; display: inline-block; width: 60px; height: 34px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }
+        .slider:before { position: absolute; content: ""; height: 26px; width: 26px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--primary-color); }
+        input:checked + .slider:before { transform: translateX(26px); }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h1 class="title">Irrigation Calculator</h1>
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <span>Dark Mode</span>
+            <label class="switch">
+                <input type="checkbox" id="darkModeToggle">
+                <span class="slider"></span>
+            </label>
+        </div>
+    </div>
+    
+    <div class="card" id="irrigationForm">
+        <div id="simple-settings">
+            <div class="input-group">
+                <label for="numPlants">1. How many plants do you have?</label>
+                <input type="number" id="numPlants" required>
+            </div>
+            <div class="input-group">
+                <label for="potSize">2. What size are the pots (in liters)?</label>
+                <input type="number" id="potSize" step="0.1" required>
+            </div>
+            <div class="input-group">
+                <label for="plantProfile">3. What kind of plants are they? (Simple Mode)</label>
+                <select id="plantProfile" required>
+                    <option value="seedlings">Young Plants / Seedlings</option>
+                    <option value="leafyGreens">Leafy Greens (e.g., Lettuce)</option>
+                    <option value="fruitingPlants">Fruiting Plants (e.g., Tomatoes, Peppers)</option>
+                    <option value="cannabisVeg">Cannabis (Vegetative)</option>
+                    <option value="cannabisFlower">Cannabis (Flowering)</option>
+                </select>
+            </div>
+             <div class="input-group">
+                <label for="pumpFlowRate">4. What is your pump's flow rate (liters/min)?</label>
+                <input type="number" id="pumpFlowRate" step="0.1" required>
+            </div>
+            <div class="input-group">
+                <label for="startTime">5. What time should the first watering start?</label>
+                <input type="time" id="startTime" value="08:00" required>
+            </div>
+        </div>
+
+        <button type="button" id="toggle-advanced">Show Advanced Settings</button>
+
+        <div id="advanced-settings">
+            <h3>Advanced Settings</h3>
+            <div class="input-group">
+                <label for="baseWaterPercentage">Watering Level (% of pot size)</label>
+                <input type="number" id="baseWaterPercentage" min="0" max="100" step="0.1" value="20" required>
+            </div>
+            <div class="input-group">
+                <label for="substrateType">Growing Material</label>
+                <select id="substrateType" required>
+                    <option value="soil">Soil</option>
+                    <option value="cocoCoir">Coco Coir</option>
+                    <option value="rockwool">Rockwool</option>
+                </select>
+            </div>
+            <div class="input-group">
+                <label for="growthStage">Growth Stage</label>
+                <select id="growthStage" required>
+                    <option value="seedling">Seedling</option>
+                    <option value="vegetative">Vegetative</option>
+                    <option value="flowering">Flowering</option>
+                    <option value="lateFlowering">Late Flowering</option>
+                </select>
+            </div>
+            <div class="input-group">
+                <label for="ambientTemperature">Ambient Temperature (°C)</label>
+                <input type="number" id="ambientTemperature" required>
+            </div>
+            <div class="input-group">
+                <label for="humidityLevel">Humidity Level (%)</label>
+                <input type="number" id="humidityLevel" required>
+            </div>
+        </div>
+
+        <hr style="margin: 20px 0;">
+        <button type="button" id="calculateButton">Calculate My Watering Plan</button>
+        <a href="/" class="button button-secondary" style="margin-left: 10px;">Back</a>
+    </div>
+
+    <div id="results-section" class="card" style="display: none;">
+        <h3>Your Daily Watering Plan</h3>
+        <p>Run pump <strong id="frequencyResult"></strong> times for <strong id="durationResult"></strong> seconds each.</p>
+        <p>Wait approx. <strong id="delayResult"></strong> between each watering.</p>
+        <button type="button" id="applyButton">Apply This Schedule to PowerMate</button>
+        <div id="statusMessage"></div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // --- DARK MODE LOGIC ---
+        const darkModeToggle = document.getElementById('darkModeToggle');
+        const body = document.body;
+        const darkMode = localStorage.getItem('darkMode') === 'true';
+        body.classList.toggle('dark-mode', darkMode);
+        if(darkModeToggle) { 
+            darkModeToggle.checked = darkMode;
+            darkModeToggle.addEventListener('change', () => {
+                body.classList.toggle('dark-mode');
+                localStorage.setItem('darkMode', darkModeToggle.checked);
+            });
+        }
+
+        // --- CALCULATOR LOGIC ---
+        let lastCalculatedSchedule = null;
+        const calculateButton = document.getElementById('calculateButton');
+        const applyButton = document.getElementById('applyButton'); 
+        const toggleAdvancedButton = document.getElementById('toggle-advanced');
+        const advancedSettingsDiv = document.getElementById('advanced-settings');
+
+        calculateButton.addEventListener('click', calculateIrrigation);
+        applyButton.addEventListener('click', applyScheduleToDevice);
+        toggleAdvancedButton.addEventListener('click', () => {
+            const isAdvanced = advancedSettingsDiv.style.display === 'block';
+            advancedSettingsDiv.style.display = isAdvanced ? 'none' : 'block';
+            toggleAdvancedButton.textContent = isAdvanced ? 'Show Advanced Settings' : 'Hide Advanced Settings';
+        });
+
+        function calculateIrrigation() {
+            const isAdvanced = advancedSettingsDiv.style.display === 'block';
+            const numPlants = parseInt(document.getElementById('numPlants').value) || 1;
+            const potSize = parseFloat(document.getElementById('potSize').value) || 5;
+            const pumpFlowRate = parseFloat(document.getElementById('pumpFlowRate').value) || 2;
+            
+            let frequency, durationPerSession, delayBetweenActivations;
+            let schedulePayload = {};
+
+            if (isAdvanced) {
+                // Advanced calculation logic
+                const baseWaterPercentage = parseFloat(document.getElementById('baseWaterPercentage').value) / 100;
+                const growthStage = document.getElementById('growthStage').value;
+                const substrateType = document.getElementById('substrateType').value;
+                const temperature = parseFloat(document.getElementById('ambientTemperature').value);
+                const humidity = parseFloat(document.getElementById('humidityLevel').value);
+                
+                // Simplified calculation for example
+                frequency = 5 + Math.floor(temperature / 10);
+                durationPerSession = 10 + Math.floor(potSize);
+                delayBetweenActivations = 120 - humidity;
+
+                schedulePayload = {
+                    mode: "advanced",
+                    baseWaterPercentage: baseWaterPercentage * 100,
+                    substrateType: substrateType,
+                    growthStage: growthStage,
+                    ambientTemperature: temperature,
+                    humidityLevel: humidity
+                };
+
+            } else {
+                // Simple calculation logic
+                const profile = document.getElementById('plantProfile').value;
+                frequency = (profile === 'seedlings') ? 3 : 5;
+                durationPerSession = 15;
+                delayBetweenActivations = 240;
+
+                schedulePayload = {
+                    mode: "simple",
+                    plantProfile: profile
+                };
+            }
+
+            const resultsElement = document.getElementById('results-section');
+            resultsElement.style.display = 'block';
+            document.getElementById('frequencyResult').textContent = frequency;
+            document.getElementById('durationResult').textContent = durationPerSession;
+            const hours = Math.floor(delayBetweenActivations / 60);
+            const minutes = delayBetweenActivations % 60;
+            document.getElementById('delayResult').textContent = `${hours}h ${minutes}m`;
+
+            lastCalculatedSchedule = {
+                ...schedulePayload, // Add simple or advanced params
+                startTime: document.getElementById('startTime').value,
+                frequency: frequency,
+                durationPerSession: durationPerSession,
+                delayBetweenActivations: delayBetweenActivations
+            };
+            resultsElement.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        async function applyScheduleToDevice() {
+            if (!lastCalculatedSchedule) { return; }
+            const statusMessage = document.getElementById('statusMessage');
+            statusMessage.textContent = 'Applying schedule...';
+            statusMessage.style.color = 'var(--primary-color)';
+            try {
+                const response = await fetch('/calculate-schedule', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(lastCalculatedSchedule)
+                });
+                const result = await response.json();
+                if (response.ok && result.status === 'success') {
+                    statusMessage.textContent = 'Success! Schedule applied.';
+                    statusMessage.style.color = 'var(--success-color)';
+                } else {
+                    throw new Error(result.message || 'Failed to apply.');
+                }
+            } catch (error) {
+                statusMessage.textContent = `Error: ${error.message}`;
+                statusMessage.style.color = 'var(--danger-color)';
+            }
+        }
+    });
+</script>
+</body>
+</html>
