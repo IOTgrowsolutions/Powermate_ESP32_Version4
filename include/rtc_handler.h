@@ -23,4 +23,9 @@ bool rtc_update_time(const DateTime& new_time);
 // Checks if a given DateTime is within the DST period.
 bool rtc_is_dst(const DateTime& dt);
 
+bool rtc_sync_ntp();
+
+int rtc_get_dst_start_month();
+int rtc_get_dst_end_month();
+
 #endif // RTC_HANDLER_H

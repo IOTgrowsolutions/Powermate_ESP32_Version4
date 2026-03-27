@@ -1,0 +1,22 @@
+
+
+[env:esp32dev]
+platform = espressif32
+board = esp32dev
+framework = arduino
+upload_speed = 115200
+board_build.filesystem = LittleFS
+
+monitor_speed = 115200
+
+lib_deps = 
+    LittleFS
+    adafruit/RTClib @ ^2.1.4
+    hasenradball/DS3231-RTC
+    knolleary/PubSubClient@^2.8
+    bblanchon/ArduinoJson@7.2.0
+
+#[env:native]
+#platform = native
+#build_flags = -std=gnu++11
+#test_framework = unity

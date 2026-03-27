@@ -36,6 +36,8 @@ struct TriggerTime {
 struct LogEntry {
     uint32_t unix_time;
     bool relayState;
+    char action[4];        // "ON" or "OFF"
+    uint32_t duration;     // Duration in seconds
 };
 
 #pragma pack(pop)
