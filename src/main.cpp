@@ -12,7 +12,7 @@
 #include "esp_err.h"
 
 // Timers
-int numberOfTimers = 2;
+int numberOfTimers = 1;
 const int MIN_TIMERS = 1;
 int safeNumberOfTimers() {
     return min(max(numberOfTimers, MIN_TIMERS), MAX_TIMERS);
@@ -50,15 +50,31 @@ const int mqttPort = 1883;
 char mqttUser[64] = "";     // Optional — leave empty if broker has no auth
 char mqttPassword[64] = ""; // Optional — leave empty if broker has no auth
 const char* mqttTopic = "pm/control"; // Topic to listen for "on" and "off" messages
+const char* mqttStatusTopic = "pm/status"; // Topic for publishing status messages
 bool shouldAttemptMqttConnection = false; // Flag to trigger MQTT connection attempts
 bool mqttConnected = false; // Track MQTT connection status
+static unsigned long lastMqttReconnectAttempt = 0; // Track last reconnection attempt time
+static const unsigned long MQTT_RECONNECT_INTERVAL = 30000; // Reconnect every 30 seconds if disconnected
 esp_timer_handle_t relay_timer;
 
 esp_mqtt_client_handle_t mqttClient = NULL;
 
+// MQTT Message Queue for retry mechanism
+struct MQTTMessage {
+    char payload[32];
+    unsigned long lastAttemptTime;
+    int retryCount;
+};
+const int MAX_PENDING_MESSAGES = 5;
+MQTTMessage pendingMessages[MAX_PENDING_MESSAGES];
+int pendingMessageCount = 0;
+static const unsigned long MQTT_RETRY_DELAY = 1000; // Retry after 1 second
+
 // Function declarations
 
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
+void publishMQTTMessage(const char* message);
+void processPendingMQTTMessages();
 void syncDeviceState();
 void setupOTA();
 void resetTriggerState(int i);
@@ -176,8 +192,22 @@ void loop() {
             Serial.println("Starting MQTT connection...");
             setupMQTT();
             shouldAttemptMqttConnection = false;
+            lastMqttReconnectAttempt = millis();
+        }
+    }
+    
+    // Automatic MQTT reconnection if disconnected and enough time has passed
+    if (wifi_is_connected() && !mqttConnected && mqttServer != nullptr && strlen(mqttServer) > 0) {
+        unsigned long now = millis();
+        if (now - lastMqttReconnectAttempt > MQTT_RECONNECT_INTERVAL) {
+            Serial.printf("[MQTT] Attempting automatic reconnection (last attempt: %lu ms ago)\n", now - lastMqttReconnectAttempt);
+            setupMQTT();
+            lastMqttReconnectAttempt = now;
         }
     } 
+    
+    // Process any pending MQTT messages that need to be retried
+    processPendingMQTTMessages(); 
     
     // Update cached RTC time with timeout protection
     // Only attempt RTC read if enough time has passed since last update
@@ -226,9 +256,12 @@ void relayCheckCallback(void* arg) {
 void setupMQTT() {
     Serial.printf("Connecting to MQTT Server: %s:%d\n", mqttServer, mqttPort);
 
-     esp_mqtt_client_config_t mqtt_cfg = {
-        .host = mqttServer,
-        .port = (uint32_t)mqttPort,
+    // Build URI from host and port
+    char mqtt_uri[256];
+    snprintf(mqtt_uri, sizeof(mqtt_uri), "mqtt://%s:%d", mqttServer, mqttPort);
+    
+    esp_mqtt_client_config_t mqtt_cfg = {
+        .uri = mqtt_uri,
         .client_id = "powermateClient",
         .username = strlen(mqttUser) > 0 ? mqttUser : nullptr,
         .password = strlen(mqttPassword) > 0 ? mqttPassword : nullptr,
@@ -248,7 +281,7 @@ void setupMQTT() {
     }
 
     esp_err_t err = esp_mqtt_client_register_event(mqttClient,
-        (esp_mqtt_event_id_t)ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
+        MQTT_EVENT_ANY, mqtt_event_handler, NULL);
     if (err != ESP_OK) {
         Serial.printf("MQTT ERROR: register_event failed: %d\n", err);
         esp_mqtt_client_destroy(mqttClient);
@@ -276,26 +309,34 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             if (mqttClient != NULL) {
                 esp_mqtt_client_subscribe(mqttClient, mqttTopic, 0);
                 Serial.printf("Subscribed to topic: %s\n", mqttTopic);
+                
+                static bool startupSent = false;
+                if (!startupSent) {
+                    publishMQTTMessage("startup");
+                    startupSent = true;
+                }
             }
             break;
         case MQTT_EVENT_DISCONNECTED:
             Serial.println("Disconnected from MQTT broker");
             mqttConnected = false;
+            lastMqttReconnectAttempt = millis(); // Allow immediate reconnection attempt
             break;
         case MQTT_EVENT_DATA:
             {
                 String topic = String(event->topic, event->topic_len);
                 String message = String(event->data, event->data_len);
-                Serial.printf("MQTT message received on topic %s: %s\n", topic.c_str(), message.c_str());
+                message.trim(); // Remove any whitespace
+                Serial.printf("MQTT message received on topic '%s': '%s' (len=%d)\n", topic.c_str(), message.c_str(), message.length());
 
                 if (topic == mqttTopic) {
-                    if (message == "on") {
+                    if (message.equalsIgnoreCase("on")) {
                         if (turnDeviceOn()) {
                             Serial.println("Device turned on via MQTT");
                         } else {
                             Serial.println("Failed to turn device on via MQTT");
                         }
-                    } else if (message == "off") {
+                    } else if (message.equalsIgnoreCase("off")) {
                         if (turnDeviceOff()) {
                             Serial.println("Device turned off via MQTT");
                         } else {
@@ -309,6 +350,76 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             break;
         default:
             break;
+    }
+}
+
+void publishMQTTMessage(const char* message) {
+    Serial.printf("publishMQTTMessage called with: %s\n", message);
+    Serial.printf("mqttConnected: %d, mqttClient: %p, mqttServer: '%s'\n", mqttConnected, mqttClient, mqttServer);
+    
+    // Try to publish immediately if MQTT is connected
+    if (mqttConnected && mqttClient != NULL && strlen(mqttServer) > 0) {
+        Serial.printf("Attempting to publish to %s: %s\n", mqttStatusTopic, message);
+        int msg_id = esp_mqtt_client_publish(mqttClient, mqttStatusTopic, message, 0, 1, 0);
+        if (msg_id != -1) {
+            Serial.printf("MQTT published to %s: %s (msg_id: %d)\n", mqttStatusTopic, message, msg_id);
+            return;  // Success, don't queue
+        }
+        Serial.println("MQTT publish failed, queuing for retry");
+    } else {
+        Serial.println("MQTT not connected, queuing message");
+    }
+    
+    // If we got here, add to queue for retry
+    if (pendingMessageCount < MAX_PENDING_MESSAGES) {
+        strlcpy(pendingMessages[pendingMessageCount].payload, message, sizeof(pendingMessages[0].payload));
+        pendingMessages[pendingMessageCount].lastAttemptTime = millis();
+        pendingMessages[pendingMessageCount].retryCount = 0;
+        pendingMessageCount++;
+        Serial.printf("Message queued. Pending messages: %d\n", pendingMessageCount);
+    } else {
+        Serial.println("ERROR: Message queue full, message dropped");
+    }
+}
+
+void processPendingMQTTMessages() {
+    if (pendingMessageCount == 0 || !mqttConnected || mqttClient == NULL) {
+        return;
+    }
+    
+    unsigned long now = millis();
+    for (int i = 0; i < pendingMessageCount; i++) {
+        // Check if enough time has passed for retry
+        if (now - pendingMessages[i].lastAttemptTime >= MQTT_RETRY_DELAY) {
+            Serial.printf("Retrying queued message: %s (attempt %d)\n", pendingMessages[i].payload, pendingMessages[i].retryCount + 1);
+            
+            int msg_id = esp_mqtt_client_publish(mqttClient, mqttStatusTopic, pendingMessages[i].payload, 0, 1, 0);
+            
+            if (msg_id != -1) {
+                // Success, remove from queue
+                Serial.printf("Queued message published successfully: %s\n", pendingMessages[i].payload);
+                // Shift remaining messages
+                for (int j = i; j < pendingMessageCount - 1; j++) {
+                    pendingMessages[j] = pendingMessages[j + 1];
+                }
+                pendingMessageCount--;
+                i--;  // Recheck this index since we shifted
+            } else {
+                // Retry failed, increment attempt count
+                pendingMessages[i].lastAttemptTime = now;
+                pendingMessages[i].retryCount++;
+                
+                // Give up after 5 retries
+                if (pendingMessages[i].retryCount >= 5) {
+                    Serial.printf("ERROR: Message failed after 5 retries, dropping: %s\n", pendingMessages[i].payload);
+                    for (int j = i; j < pendingMessageCount - 1; j++) {
+                        pendingMessages[j] = pendingMessages[j + 1];
+                    }
+                    pendingMessageCount--;
+                    i--;  // Recheck this index since we shifted
+                }
+            }
+        }
     }
 }
 
@@ -450,6 +561,7 @@ bool turnDeviceOn() {
       Serial.println("[main.cpp] Requesting to log ON action..."); 
       storage_log_to_file(newLog);// First, write the log to the permanent file
       add_log_to_ram_buffer(newLog);// THEN, update the live RAM buffer for the web page
+      publishMQTTMessage("on");
     }
     return success;
 }
@@ -470,6 +582,7 @@ bool turnDeviceOff() {
       Serial.println("[main.cpp] Requesting to log OFF action..."); 
       storage_log_to_file(newLog); // First, write the log to the permanent file
       add_log_to_ram_buffer(newLog); // THEN, update the live RAM buffer for the web page
+      publishMQTTMessage("off");
     } else
     {
       Serial.println("Failed to turn device off.");

@@ -476,7 +476,7 @@ void handleStatusJson() {
     doc["localIp"] = WiFi.localIP().toString();
     doc["apIp"] = WiFi.softAPIP().toString();
     doc["mqttIp"] = mqttServer;
-    doc["firmwareVersion"] = "4.0";
+    doc["firmwareVersion"] = "4.1";
     doc["timezoneOffset"] = rtc_get_timezone_offset();
     doc["dstEnabled"] = rtc_is_dst_enabled();
     doc["rtcOk"] = rtc_is_ok();
@@ -776,7 +776,7 @@ void handleApiUpdateConfig() {
 void handleApiSystemInfo() {
     JsonDocument doc;
     
-    doc["firmware"]["version"] = "4.0";
+    doc["firmware"]["version"] = "4.1";
     doc["hardware"]["chip"] = ESP.getChipModel();
     doc["hardware"]["revision"] = ESP.getChipRevision();
     doc["system"]["uptime"] = millis() / 1000;
