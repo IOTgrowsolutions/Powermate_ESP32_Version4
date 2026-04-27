@@ -509,9 +509,23 @@ void checkAndActivateTimers(const DateTime& now) {
         //Serial.printf("[DEBUG] Checking Timer %d: Active=%s, Day enabled=%d\n", 
         //              i, triggerStates[i].active ? "YES" : "NO", days[currentDay]);
         
-        if (days[currentDay] == 0) {
-            Serial.printf("[DEBUG] Timer %d: Day not enabled, skipping.\n", i);
+        bool inProgress = triggerStates[i].active || (!triggerStates[i].firstActivationPending && triggerStates[i].activations < triggerDays[i].repetitions);
+        
+        if (days[currentDay] == 0 && !inProgress) {
+            // Serial.printf("[DEBUG] Timer %d: Day not enabled, skipping.\n", i);
             continue;
+        }
+
+        // If timer is completed and we are no longer in the trigger minute, reset it.
+        if (!triggerStates[i].active && 
+            !triggerStates[i].firstActivationPending && 
+            triggerStates[i].activations >= triggerDays[i].repetitions) 
+        {
+            if (now.hour() != triggerDays[i].hour || now.minute() != triggerDays[i].minute) {
+                resetTriggerState(i);
+                Serial.printf("Timer %d reset after completion.\n", i);
+                continue; // Skip the rest of the checks for this timer
+            }
         }
 
         if (!triggerStates[i].active) {
@@ -597,13 +611,19 @@ void resetActivationsOnDayChange(const DateTime& now) {
     if (lastCheckedDay != currentDay && lastCheckedDay != -1) {
         Serial.printf("Day change detected. Old day: %d, New day: %d\n", lastCheckedDay, currentDay);
         for (int i = 0; i < safeNumberOfTimers(); i++) {
-            triggerStates[i].activations = 0;
-            triggerStates[i].firstActivationPending = true;
-            triggerStates[i].lastDeactivationTime = 0;
-            if (triggerStates[i].active) {
-                turnDeviceOff();
-                triggerStates[i].active = false;
-                Serial.printf("Timer %d stopped due to day change.\n", i);
+            bool inProgress = triggerStates[i].active || (!triggerStates[i].firstActivationPending && triggerStates[i].activations < triggerDays[i].repetitions);
+            
+            if (!inProgress) {
+                triggerStates[i].activations = 0;
+                triggerStates[i].firstActivationPending = true;
+                triggerStates[i].lastDeactivationTime = 0;
+                if (triggerStates[i].active) {
+                    turnDeviceOff();
+                    triggerStates[i].active = false;
+                }
+                Serial.printf("Timer %d stopped/reset due to day change.\n", i);
+            } else {
+                Serial.printf("Timer %d is in progress, skipping day change reset to allow overnight completion.\n", i);
             }
         }
         lastCheckedDay = currentDay;
