@@ -95,31 +95,35 @@ void web_server_init() {
         server.streamFile(file, "text/html");
         file.close();
     });
+    server.on("/id", HTTP_GET, []() {
+        String uniqueId = wifi_get_unique_ssid();
+        String jsonResponse = "{\"id\":\"PowerMate-ESP32\",\"uniqueId\":\"" + uniqueId + "\"}";
+        server.send(200, "application/json", jsonResponse);
+    });
     server.on("/saveMQTT", HTTP_POST, []() {
         if (!server.hasArg("IP")) {
             server.send(400, "application/json",
             "{\"success\":false,\"message\":\"Missing required fields\"}");
-        return;
-    }
+            return;
+        }
+        // --- THIS IS THE CRUCIAL LINE ---
+        // You must declare the variable and get the value from the form submission.
+        String MQTTIpAddress = server.arg("IP");
+        String MQTTUser = server.arg("user");
+        String MQTTPass = server.arg("password");
 
-    // --- THIS IS THE CRUCIAL LINE ---
-    // You must declare the variable and get the value from the form submission.
-    String MQTTIpAddress = server.arg("IP");
-    String MQTTUser = server.arg("user");
-    String MQTTPass = server.arg("password");
-
-    if (storage_save_mqtt_config(MQTTIpAddress.c_str(), MQTTUser.c_str(), MQTTPass.c_str())) {
-        strlcpy(mqttUser, MQTTUser.c_str(), sizeof(mqttUser));
-        strlcpy(mqttPassword, MQTTPass.c_str(), sizeof(mqttPassword));
-        strlcpy(mqttServer, MQTTIpAddress.c_str(), sizeof(mqttServer));
-        server.send(200, "application/json",
-            "{\"success\":true,\"message\":\"MQTT settings saved successfully\"}");
-        shouldAttemptMqttConnection = true; // Signal the main loop to try connecting again
-    } else {
-        server.send(500, "application/json",
-            "{\"success\":false,\"message\":\"Failed to save settings\"}");
-    }
-});
+        if (storage_save_mqtt_config(MQTTIpAddress.c_str(), MQTTUser.c_str(), MQTTPass.c_str())) {
+            strlcpy(mqttUser, MQTTUser.c_str(), sizeof(mqttUser));
+            strlcpy(mqttPassword, MQTTPass.c_str(), sizeof(mqttPassword));
+            strlcpy(mqttServer, MQTTIpAddress.c_str(), sizeof(mqttServer));
+            server.send(200, "application/json",
+                "{\"success\":true,\"message\":\"MQTT settings saved successfully\"}");
+            shouldAttemptMqttConnection = true; // Signal the main loop to try connecting again
+        } else {
+            server.send(500, "application/json",
+                "{\"success\":false,\"message\":\"Failed to save settings\"}");
+        }
+    });
     server.on("/status.json", HTTP_GET, handleStatusJson);
 
     server.on("/firmware", HTTP_GET, handleFirmwarePage);

@@ -150,8 +150,7 @@ String getLastFourOfMAC() {
 
 
 static void _wifi_setup_mdns() {
-    String hostname = "powermate-" + WiFi.macAddress();
-    hostname.replace(":", "");
+    String hostname = WiFi.softAPSSID();
     hostname.toLowerCase();
 
     mdns_hostname_set(hostname.c_str());
