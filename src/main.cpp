@@ -178,8 +178,17 @@ void loop() {
 
     // Process deferred relay actions from timer callback
     if (pendingTimerCheck) {
+        // Clear flag immediately to avoid re-entrancy
         pendingTimerCheck = false;
-        checkAndActivateTimers(lastCachedTime);
+
+        // Perform an RTC read here (safe context) and run timer logic
+        lastCachedTime = rtc_get_current_time();
+        rtcCacheValid = rtc_is_ok() && lastCachedTime.isValid();
+        if (rtcCacheValid) {
+            checkAndActivateTimers(lastCachedTime);
+        } else {
+            Serial.println("[WARN] Skipping timer processing: RTC not valid");
+        }
     }
     
     if (shouldAttemptMqttConnection) {
@@ -229,28 +238,9 @@ void loop() {
 }   
 
 void relayCheckCallback(void* arg) {
-    // Safe to do: read cached state and set atomic flags only
-    syncDeviceState();
-
-    static unsigned long lastRtcUpdate = 0;
-    unsigned long now_ms = millis();
-    if (!rtcCacheInitialized || (now_ms - lastRtcUpdate > 1000)) {
-        lastRtcUpdate = now_ms;
-        lastCachedTime = rtc_get_current_time();
-        rtcCacheValid = rtc_is_ok() && lastCachedTime.isValid();
-        rtcCacheInitialized = true;
-    }
-
-    if (rtcCacheValid) {
-        // Signal loop() to run full timer logic
-        for (int i = 0; i < safeNumberOfTimers(); i++) {
-            if (!triggerStates[i].active && shouldActivateTimer(i, lastCachedTime)) {
-                pendingTimerCheck = true;
-            } else if (triggerStates[i].active && shouldDeactivateTimer(i, lastCachedTime)) {
-                pendingTimerCheck = true;
-            }
-        }
-    }
+    // Keep this callback minimal and safe: only set a flag for the main loop to perform
+    // heavier operations (RTC reads, timer checks, filesystem, MQTT, etc.).
+    pendingTimerCheck = true;
 }
 
 void setupMQTT() {

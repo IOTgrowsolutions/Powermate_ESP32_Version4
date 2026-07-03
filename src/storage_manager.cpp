@@ -188,6 +188,64 @@ void storage_log_to_file(const LogEntry& log) {
     }
     logFile.write((uint8_t*)&log, sizeof(LogEntry));
     logFile.close();
+
+    // After appending, check whether the file has grown too large and compact if needed.
+    File f = LittleFS.open("/activity.log", "r");
+    if (!f) return;
+    size_t file_size = f.size();
+    f.close();
+
+    int total_entries = file_size / sizeof(LogEntry);
+    const int COMPACT_THRESHOLD = MAX_LOG_ENTRIES * 2; // compact when more than twice the max
+    if (total_entries > COMPACT_THRESHOLD) {
+        Serial.printf("[storage] activity.log has %d entries; compacting to last %d entries\n", total_entries, MAX_LOG_ENTRIES);
+
+        // Allocate buffer for newest entries
+        size_t bytes_to_keep = (size_t)MAX_LOG_ENTRIES * sizeof(LogEntry);
+        LogEntry* buffer = (LogEntry*)malloc(bytes_to_keep);
+        if (buffer == NULL) {
+            Serial.println("[storage] Compact failed: OOM");
+            return;
+        }
+
+        File r = LittleFS.open("/activity.log", "r");
+        if (!r) {
+            free(buffer);
+            return;
+        }
+        // Seek to the starting position for the last MAX_LOG_ENTRIES
+        size_t start_pos = (total_entries > MAX_LOG_ENTRIES) ? (r.size() - bytes_to_keep) : 0;
+        r.seek(start_pos, SeekSet);
+        size_t actually_read = r.read((uint8_t*)buffer, bytes_to_keep);
+        r.close();
+
+        if (actually_read != bytes_to_keep) {
+            Serial.println("[storage] Compact failed: read size mismatch");
+            free(buffer);
+            return;
+        }
+
+        // Write to a temporary file then replace the original to avoid corruption
+        File tmp = LittleFS.open("/activity.tmp", "w");
+        if (!tmp) {
+            Serial.println("[storage] Compact failed: cannot open temp file");
+            free(buffer);
+            return;
+        }
+        tmp.write((const uint8_t*)buffer, bytes_to_keep);
+        tmp.close();
+        free(buffer);
+
+        // Replace original with compacted file
+        LittleFS.remove("/activity.log");
+        if (!LittleFS.rename("/activity.tmp", "/activity.log")) {
+            Serial.println("[storage] Compact failed: rename failed");
+            // best effort: try to remove tmp
+            LittleFS.remove("/activity.tmp");
+        } else {
+            Serial.println("[storage] activity.log compacted successfully");
+        }
+    }
 }
 
 int storage_load_logs_from_file(LogEntry logs[], int max_logs) {
@@ -215,6 +273,48 @@ int storage_load_logs_from_file(LogEntry logs[], int max_logs) {
     }
 
     int total_entries = file_size / sizeof(LogEntry);
+    const int COMPACT_THRESHOLD = max_logs * 2; // if file has grown too large, compact first
+
+    if (total_entries > COMPACT_THRESHOLD) {
+        Serial.printf("[storage] Boot-time compaction: %d entries -> keep last %d\n", total_entries, max_logs);
+        // Perform compaction similar to storage_log_to_file
+        size_t bytes_to_keep = (size_t)max_logs * sizeof(LogEntry);
+        LogEntry* buffer = (LogEntry*)malloc(bytes_to_keep);
+        if (buffer) {
+            size_t start_pos = file_size - bytes_to_keep;
+            logFile.seek(start_pos, SeekSet);
+            size_t actually_read = logFile.read((uint8_t*)buffer, bytes_to_keep);
+            logFile.close();
+            if (actually_read == bytes_to_keep) {
+                File tmp = LittleFS.open("/activity.tmp", "w");
+                if (tmp) {
+                    tmp.write((const uint8_t*)buffer, bytes_to_keep);
+                    tmp.close();
+                    LittleFS.remove("/activity.log");
+                    if (LittleFS.rename("/activity.tmp", "/activity.log")) {
+                        Serial.println("[storage] Boot-time compaction successful");
+                    } else {
+                        Serial.println("[storage] Boot-time compaction rename failed");
+                        LittleFS.remove("/activity.tmp");
+                    }
+                }
+            }
+            free(buffer);
+        } else {
+            Serial.println("[storage] Boot-time compaction skipped: OOM");
+            logFile.close();
+        }
+
+        // Re-open the file to continue with the smaller size
+        logFile = LittleFS.open("/activity.log", "r");
+        if (!logFile) {
+            Serial.println("[storage] After compaction, /activity.log open failed");
+            return 0;
+        }
+        file_size = logFile.size();
+        total_entries = file_size / sizeof(LogEntry);
+    }
+
     int entries_to_read = min(total_entries, max_logs);
     Serial.printf("  -> DEBUG: Total entries in file: %d. Will read up to %d entries.\n", total_entries, entries_to_read);
 

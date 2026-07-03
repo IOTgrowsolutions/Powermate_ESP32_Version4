@@ -204,11 +204,14 @@ void web_server_init() {
     server.on("/api/v1/system", HTTP_GET, handleApiSystemInfo);
     server.on("/api/v1/logs", HTTP_GET, handleApiGetLogs);
 
-    // Handle timer-specific endpoints with ID
-    server.on("/api/v1/timers/0", HTTP_GET, []() { handleApiGetTimerById(0); });
-    server.on("/api/v1/timers/0", HTTP_PUT, []() { handleApiUpdateTimerById(0); });
-    server.on("/api/v1/timers/1", HTTP_GET, []() { handleApiGetTimerById(1); });
-    server.on("/api/v1/timers/1", HTTP_PUT, []() { handleApiUpdateTimerById(1); });
+    // Handle timer-specific endpoints for all supported timers
+    // Register routes in a loop to avoid duplication and ensure all IDs are available
+    for (int i = 0; i < MAX_TIMERS; ++i) {
+        int id = i; // capture loop variable for lambda
+        String path = String("/api/v1/timers/") + String(id);
+        server.on(path, HTTP_GET, [id]() { handleApiGetTimerById(id); });
+        server.on(path, HTTP_PUT, [id]() { handleApiUpdateTimerById(id); });
+    }
     server.on("/wdt-test", HTTP_GET, []() {
     server.send(200, "text/plain", "WDT test started — device will reset in 30s");
     // Simulate a hang — watchdog should fire and reboot
@@ -583,6 +586,10 @@ void handleApiControl() {
 
 void handleApiGetTimers() {
     JsonDocument doc;
+    // Expose global active days clearly alongside timers
+    JsonArray active = doc["activeDays"].to<JsonArray>();
+    for (int d = 0; d < 7; ++d) active.add(days[d] == 1);
+
     JsonArray timers = doc["timers"].to<JsonArray>();
     
     for (int i = 0; i < safeNumberOfTimers(); i++) {
@@ -593,7 +600,7 @@ void handleApiGetTimers() {
         timer["duration"] = triggerDays[i].activationDuration;
         timer["delay"] = triggerDays[i].delayBetweenActivations;
         timer["repetitions"] = triggerDays[i].repetitions;
-        timer["days"] = days[i];  // Use the global days array
+        // Note: per-timer "days" is not supported. Active days are global in `activeDays`.
         timer["enabled"] = true;  // Timers are enabled if they exist
         timer["activations"] = triggerStates[i].activations;
     }
@@ -617,25 +624,22 @@ void handleApiCreateTimer() {
         return;
     }
 
-    // For now, just update timer 0 as an example
-    // In a full implementation, you'd create a new timer slot
+    // For compatibility keep a simple create behaviour: write to timer 0 if present
     int timerId = 0;
-    
-    triggerDays[timerId].hour = doc["hour"] | 0;
-    triggerDays[timerId].minute = doc["minute"] | 0;
-    triggerDays[timerId].activationDuration = (doc["duration"] | 0) ;
-    triggerDays[timerId].delayBetweenActivations = (doc["delay"] | 0);
-    triggerDays[timerId].repetitions = doc["repetitions"] | 1;
-    days[timerId] = doc["days"] | 0;  // Store in global days array
-    // No individual enabled field - timers are enabled by default
+    triggerDays[timerId].hour = doc["hour"] | triggerDays[timerId].hour;
+    triggerDays[timerId].minute = doc["minute"] | triggerDays[timerId].minute;
+    triggerDays[timerId].activationDuration = (doc["duration"] | triggerDays[timerId].activationDuration);
+    triggerDays[timerId].delayBetweenActivations = (doc["delay"] | triggerDays[timerId].delayBetweenActivations);
+    triggerDays[timerId].repetitions = doc["repetitions"] | triggerDays[timerId].repetitions;
 
+    // Do NOT modify global active days here. Use /submit form to change them.
     storage_save_settings(numberOfTimers, triggerDays, days);
-    
+
     JsonDocument response;
     response["success"] = true;
-    response["message"] = "Timer created";
+    response["message"] = "Timer created/updated";
     response["timerId"] = timerId;
-    
+
     String jsonResponse;
     serializeJson(response, jsonResponse);
     server.send(201, "application/json", jsonResponse);
@@ -654,7 +658,7 @@ void handleApiGetTimerById(int id) {
     doc["duration"] = triggerDays[id].activationDuration ;
     doc["delay"] = triggerDays[id].delayBetweenActivations ;
     doc["repetitions"] = triggerDays[id].repetitions;
-    doc["days"] = days[id];  // Use global days array
+    // Do not expose per-timer days. Global active days are available via /status.json and /api/v1/timers (activeDays)
     doc["enabled"] = true;   // Timers are enabled if they exist
     doc["activations"] = triggerStates[id].activations;
 
@@ -682,14 +686,40 @@ void handleApiUpdateTimerById(int id) {
         return;
     }
 
-    triggerDays[id].hour = doc["hour"] | triggerDays[id].hour;
-    triggerDays[id].minute = doc["minute"] | triggerDays[id].minute;
-    triggerDays[id].activationDuration = (doc["duration"] | (triggerDays[id].activationDuration));
-    triggerDays[id].delayBetweenActivations = (doc["delay"] | (triggerDays[id].delayBetweenActivations));
-    triggerDays[id].repetitions = doc["repetitions"] | triggerDays[id].repetitions;
-    days[id] = doc["days"] | days[id];  // Update global days array
-    // No individual enabled field to update
 
+    // Validate and update only allowed per-timer fields
+    if (!doc["hour"].isNull()) {
+        int h = doc["hour"] | -1;
+        if (h < 0 || h > 23) { server.send(400, "application/json", "{\"error\":\"hour out of range\"}"); return; }
+        triggerDays[id].hour = h;
+    }
+    if (!doc["minute"].isNull()) {
+        int m = doc["minute"] | -1;
+        if (m < 0 || m > 59) { server.send(400, "application/json", "{\"error\":\"minute out of range\"}"); return; }
+        triggerDays[id].minute = m;
+    }
+    if (!doc["second"].isNull()) {
+        int s = doc["second"] | -1;
+        if (s < 0 || s > 59) { server.send(400, "application/json", "{\"error\":\"second out of range\"}"); return; }
+        triggerDays[id].second = s;
+    }
+    if (!doc["duration"].isNull()) {
+        long dur = doc["duration"] | 0;
+        if (dur <= 0) { server.send(400, "application/json", "{\"error\":\"duration must be positive\"}"); return; }
+        triggerDays[id].activationDuration = dur;
+    }
+    if (!doc["delay"].isNull()) {
+        long d = doc["delay"] | 0;
+        if (d < 0) { server.send(400, "application/json", "{\"error\":\"delay must be non-negative\"}"); return; }
+        triggerDays[id].delayBetweenActivations = d;
+    }
+    if (!doc["repetitions"].isNull()) {
+        int r = doc["repetitions"] | 0;
+        if (r < 0) { server.send(400, "application/json", "{\"error\":\"repetitions must be >= 0\"}"); return; }
+        triggerDays[id].repetitions = r;
+    }
+
+    // Do NOT modify global `days` here — keep activeDays as a separate, global setting
     storage_save_settings(numberOfTimers, triggerDays, days);
 
     JsonDocument response;
