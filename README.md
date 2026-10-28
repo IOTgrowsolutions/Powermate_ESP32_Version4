@@ -100,10 +100,12 @@ pio device monitor
 ## 🔧 Configuration
 
 ### Initial Setup
-1. Power on the ESP32 - it will create an Access Point named "PowerMate-ESP32"
-2. Connect to the AP using password: `powermate123`
-3. Open a browser and navigate to `http://192.168.4.1`
-4. Configure WiFi settings and device preferences
+. Power on the ESP32. It creates an access point named
+   `PowerMate-XXXX`, where `XXXX` is derived from the final
+   four hexadecimal characters of the device MAC address.
+2. Connect using the default AP password: `powerm8te`.
+3. Open `http://192.168.4.1`.
+4. Configure Wi-Fi and device settings.
 
 ### Timer Configuration
 - **Schedule**: Set activation times (hour/minute)
