@@ -303,9 +303,9 @@
                     }
                 } else if (inputs[i].type === 'number' && inputs[i].name.startsWith('activationDuration')) {
                     const activationDuration = parseInt(inputs[i].value, 10);
-                    if (isNaN(activationDuration) || activationDuration <= 0) {
+                    if (isNaN(activationDuration) || activationDuration < 1) {
                         const timerIndex = inputs[i].name.match(/\d+/)[0];
-                        errorMessages.push('Activation Duration for Trigger ' + (parseInt(timerIndex, 10) + 1) + ' must be greater than zero.');
+                        errorMessages.push('Activation Duration for Trigger ' + (parseInt(timerIndex, 10) + 1) + ' must be at least 1 second.');
                     }
                 }
             }
@@ -441,7 +441,7 @@
                 if (data.currentTime) {
                     const info = document.getElementById('systemInfo');
                     if (info) {
-                        info.textContent = 'System Time: ' + data.currentTime + ' | Firmware: ' + (data.firmwareVersion || '4.0');
+                        info.textContent = 'System Time: ' + data.currentTime + ' | Firmware: ' + (data.firmwareVersion || '4.01');
                     }
                 }
             } catch (error) {

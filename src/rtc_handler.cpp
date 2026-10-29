@@ -2,6 +2,7 @@
 #include "storage_manager.h"
 #include <Wire.h>
 
+
 // --- Private variables for the RTC handler ---
 RTC_DS3231 Rtc;
 TwoWire I2C_BUS = TwoWire(0);
@@ -79,6 +80,7 @@ DateTime rtc_get_current_time() {
     return result;    
 }
 
+
 bool rtc_update_time(const DateTime& new_time_utc) {
     if (!new_time_utc.isValid()) return false;
     
@@ -126,4 +128,49 @@ bool rtc_is_dst(const DateTime& dt) {
 
 bool rtc_is_dst_enabled() {
     return useDST; // 'useDST' is the private variable inside this module.
+}
+
+bool rtc_sync_ntp() {
+    configTime(0, 0, "time.nist.gov", "pool.ntp.org"); // Get UTC
+
+    struct tm timeinfo = {};
+    int attempts = 0;
+    // getLocalTime blocks briefly — safe here as we're called from wifi_notify_got_ip()
+    while (!getLocalTime(&timeinfo, 1000) && attempts < 10) {
+        Serial.print(".");
+        attempts++;
+    }
+
+    if (attempts >= 10) {
+        Serial.println("NTP sync failed: no response");
+        return false;
+    }
+
+    // Convert to DateTime (UTC)
+    DateTime ntpTime(
+        timeinfo.tm_year + 1900,
+        timeinfo.tm_mon + 1,
+        timeinfo.tm_mday,
+        timeinfo.tm_hour,
+        timeinfo.tm_min,
+        timeinfo.tm_sec
+    );
+
+    if (!ntpTime.isValid()) {
+        Serial.println("NTP sync failed: invalid DateTime");
+        return false;
+    }
+
+    Serial.printf("NTP sync successful: %04d/%02d/%02d %02d:%02d:%02d UTC\n",
+        ntpTime.year(), ntpTime.month(), ntpTime.day(),
+        ntpTime.hour(), ntpTime.minute(), ntpTime.second());
+
+    return rtc_update_time(ntpTime);
+}
+int rtc_get_dst_start_month() {
+    return 3; // March — matches the hardcoded value in rtc_is_dst()
+}
+
+int rtc_get_dst_end_month() {
+    return 10; // October — matches the hardcoded value in rtc_is_dst()
 }
