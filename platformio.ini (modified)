@@ -1,0 +1,18 @@
+[env]
+platform = your_platform
+board = your_board
+framework = arduino
+
+[env:test]
+lib_deps = 
+    unity
+test_build_dir = .pio/build/test
+test_ignore = 
+    test/test_rtc_handler.c
+    test/test_storage_manager.c
+    test/test_wifi_manager.c
+    test/test_web_server.c
+
+[test]
+test_port = /dev/ttyUSB0
+test_runner = unity

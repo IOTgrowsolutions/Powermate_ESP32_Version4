@@ -27,12 +27,17 @@ void storage_save_timezone(int8_t tz, bool use_dst);
 void storage_load_timezone(int8_t& tz, bool& use_dst);
 
 // MQTT
-bool storage_save_mqtt_config(const char* ip);
-bool storage_load_mqtt_config(char* ip_buffer, int buffer_size);
+bool storage_save_mqtt_config(const char* ip, const char* user = nullptr, const char* pass = nullptr);
+bool storage_load_mqtt_config(char* ip_buffer, int ip_size, char* user_buffer = nullptr, int user_size = 0, char* pass_buffer = nullptr, int pass_size = 0);
 
 // --- NEW FILE-BASED LOGGING FUNCTIONS ---
 void storage_log_to_file(const LogEntry& log);
 int storage_load_logs_from_file(LogEntry logs[], int max_logs);
 void storage_verify_layout();
 
+#ifdef ENABLE_DEBUG_UTILS
+void storage_dump_eeprom(int start, int end);
+#endif
+
+#define MAX_IP_LENGTH 16 
 #endif // STORAGE_MANAGER_H

@@ -100,7 +100,7 @@ pio device monitor
 ## 🔧 Configuration
 
 ### Initial Setup
-. Power on the ESP32. It creates an access point named
+1. Power on the ESP32. It creates an access point named
    `PowerMate-XXXX`, where `XXXX` is derived from the final
    four hexadecimal characters of the device MAC address.
 2. Connect using the default AP password: `powerm8te`.
@@ -242,6 +242,40 @@ For questions, issues, or contributions:
 ---
 
 **Device Name**: PowerMate-{MAC_LAST_4}
-**Default AP**: PowerMate-ESP32
+**Default AP**: PowerMate-XXXX (`XXXX` is the final four hexadecimal characters of the MAC address)
 **Default Password**: powerm8te
 **Firmware Version**: 4.1
+
+
+Updates:
+Complete REST API Section with all endpoints documented
+Request/Response Examples for each endpoint
+Third-Party Integration Examples (Home Assistant, Node-RED, cURL)
+Error Handling documentation
+Security Considerations
+Version History updated to v4.1
+New API_REFERENCE.md File:
+Quick Reference Guide for developers
+Endpoint Summary with key examples
+Integration Snippets for common use cases
+🔄 Version Updates
+Firmware Version: Updated from 4.0 → 4.01 across all files
+Version History: Added v4.1 with REST API features
+📋 Key Documentation Features
+Complete Endpoint Coverage:
+✅ Device status & control
+✅ Timer management (CRUD operations)
+✅ Configuration management
+✅ System monitoring
+✅ Activity logs
+Integration Examples:
+Home Assistant REST integration
+Node-RED HTTP request flows
+cURL command examples
+Error handling patterns
+Developer-Friendly:
+JSON schemas for all requests/responses
+HTTP status codes documentation
+Field descriptions and validation rules
+Backward compatibility notes
+The documentation now provides everything needed for developers to integrate PowerMate with third-party services using the new REST API! The API is ready for Home Assistant, custom mobile apps, Node-RED automations, and any other REST-compatible platforms.

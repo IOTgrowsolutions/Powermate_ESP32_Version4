@@ -1,30 +1,18 @@
 #include <Arduino.h>
-#include <WiFi.h>
-#include <WebServer.h>
-#include <DNSServer.h>
-#include <EEPROM.h>
 #include <ArduinoOTA.h>
-#include <ArduinoJson.h>
-#include <set>
-#include <ESPmDNS.h>
 #include <LittleFS.h>
-#include "RequestLimiter.h"
-#include <Wire.h>
-#include <HTTPClient.h>
-#include <RTClib.h>
-#include <PubSubClient.h>
+#include <mqtt_client.h>
 #include "wifi_manager.h"
 #include "storage_manager.h"
 #include "rtc_handler.h"
 #include "web_server.h"
 #include "project_types.h"
-
-int numberOfTimers = 2;
-
-const int I2C_SDA_PIN = 21;
-const int I2C_SCL_PIN = 22;
+#include "esp_task_wdt.h" // Include the ESP32 Watchdog Timer library
+#include "esp_timer.h"
+#include "esp_err.h"
 
 // Timers
+int numberOfTimers = 1;
 const int MIN_TIMERS = 1;
 int safeNumberOfTimers() {
     return min(max(numberOfTimers, MIN_TIMERS), MAX_TIMERS);
@@ -33,81 +21,84 @@ int safeNumberOfTimers() {
 // Relay settings
 const int relayPin = 16; //ESP32_AC = 16 or 33
 
+// Cached RTC time to avoid blocking I2C in timer callbacks
+DateTime lastCachedTime = DateTime(2000, 1, 1, 0, 0, 0);  // Initialize to epoch (Jan 1, 2000)
+bool rtcCacheValid = false;
 
 TriggerTime triggerDays[MAX_TIMERS];
 TriggerState triggerStates[MAX_TIMERS];
 
 LogEntry relayLog[MAX_LOG_ENTRIES];
 
-unsigned long bootTime;
-bool isI2CInitialized = false;
-DateTime initialRtcTime;
-unsigned long startupMillis;
 const char* getDayOfWeek(int dayIndex) {
     const char* days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
     return days[dayIndex];
 }
-// DST configuration
-int dstStartMonth = 3;  // March
-int dstEndMonth = 10;  // October
-int dstStartDayOfWeek = 0;  // Sunday
-int dstEndDayOfWeek = 0;  // Sunday
-int dstStartWeek = 2;  // Second week
-int dstEndWeek = 1;  // First week
-const int dstOffset = 3600;  // 1 hour in seconds
 
 int days[7] = {0}; // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
 int logIndex = 0;
-bool timer0Active = false;
-bool timer1Active = false;
 // Device control variables
 bool deviceIsOn = false;
 bool bypassModeEnabled = false;
-unsigned long lastCheckTime = 0;
 const unsigned long CHECK_INTERVAL = 100; // Check every 100ms
+volatile bool pendingTimerCheck = false;
+volatile bool rtcCacheInitialized = false;
 
 // MQTT Configuration
-const char* mqttServer = "0.0.0.0";
+char mqttServer[MAX_IP_LENGTH] = "";
 const int mqttPort = 1883;
-//const char* mqttUser = "your-mqtt-username"; // Optional, if your broker requires authentication
-//const char* mqttPassword = "your-mqtt-password"; // Optional
+char mqttUser[64] = "";     // Optional — leave empty if broker has no auth
+char mqttPassword[64] = ""; // Optional — leave empty if broker has no auth
 const char* mqttTopic = "pm/control"; // Topic to listen for "on" and "off" messages
+const char* mqttStatusTopic = "pm/status"; // Topic for publishing status messages
 bool shouldAttemptMqttConnection = false; // Flag to trigger MQTT connection attempts
+bool mqttConnected = false; // Track MQTT connection status
+static unsigned long lastMqttReconnectAttempt = 0; // Track last reconnection attempt time
+static const unsigned long MQTT_RECONNECT_INTERVAL = 30000; // Reconnect every 30 seconds if disconnected
+esp_timer_handle_t relay_timer;
 
-WiFiClient powermateClient;
-PubSubClient mqttClient(powermateClient);
+esp_mqtt_client_handle_t mqttClient = NULL;
 
-
+// MQTT Message Queue for retry mechanism
+struct MQTTMessage {
+    char payload[32];
+    unsigned long lastAttemptTime;
+    int retryCount;
+};
+const int MAX_PENDING_MESSAGES = 5;
+MQTTMessage pendingMessages[MAX_PENDING_MESSAGES];
+int pendingMessageCount = 0;
+static const unsigned long MQTT_RETRY_DELAY = 1000; // Retry after 1 second
 
 // Function declarations
 
-void mqttCallback(char* topic, byte* payload, unsigned int length);
+static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
+void publishMQTTMessage(const char* message);
+void processPendingMQTTMessages();
 void syncDeviceState();
 void setupOTA();
 void resetTriggerState(int i);
 bool turnDeviceOn();
 bool turnDeviceOff();
-void checkAndActivateTimers();
-void resetActivationsOnDayChange();
-void sendChunked(const __FlashStringHelper* content);
-
-void logRTCTime(const char* context) ;
-void  logInitialRTCTime();
-void logTimerState(int i);
+void checkAndActivateTimers(const DateTime& now);
+void resetActivationsOnDayChange(const DateTime& now);
 bool readRelayState();
-uint32_t getTimeDifference(DateTime current, DateTime previous);
+bool shouldActivateTimer(int idx, const DateTime& now);
+bool shouldDeactivateTimer(int idx, const DateTime& now);
 void setupMQTT();
-bool validateTimerSettings(const TriggerTime& timer) ;
-bool validateTime(const DateTime& time) ;
-void resetTimerState(int timerId);
 void add_log_to_ram_buffer(const LogEntry& newLog);
-// HTML generation functions
-String generateInfoItem(const String& label, const String& value);
-String generateCurrentTimeCard();
-String deviceName;
-String generateUpdateTimeForm();
-String generateTimeFormFields(); 
-String generateFirmwareVersionCard();
+void relayCheckCallback(void* arg);
+void wifi_notify_got_ip() ;
+
+void wifi_notify_got_ip() {
+    Serial.println("IP confirmed — triggering NTP sync");
+    if (rtc_sync_ntp()) {
+        Serial.println("RTC updated from NTP successfully");
+    } else {
+        Serial.println("NTP sync failed — RTC keeps existing time");
+    }
+    shouldAttemptMqttConnection = true;
+}
 
 void add_log_to_ram_buffer(const LogEntry& newLog) {
     if (logIndex >= MAX_LOG_ENTRIES) {
@@ -125,203 +116,9 @@ void add_log_to_ram_buffer(const LogEntry& newLog) {
     }
 }
 
-String generateInfoItem(const String& label, const String& value) {
-  return "<span class='info-label'>" + label + ":</span><span>" + value + "</span>";
-}
-
-String generateActiveDaysCard() {
-  String card = "<div class='card'><h2>Active Days</h2><div class='days-grid'>";
-  const char* dayNames[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
-  for (int i = 0; i < 7; i++) {
-    card += "<div class='day-item" + String(days[i] == 1 ? " active" : "") + "'>" + dayNames[i] + "</div>";
-  }
-  card += "</div></div>";
-  return card;
-}
-
-String generateSystemInfoCards() {
-  String cards = "<div class='dashboard-grid'>";
-  cards += generateCurrentTimeCard();
-  cards += generateFirmwareVersionCard();
-  
-  cards += "</div>";
-  return cards;
-}
-
-String generateCurrentTimeCard() {
-    DateTime now = rtc_get_current_time();
-    char datestring[20];
-    snprintf_P(datestring, sizeof(datestring),
-             PSTR("%04u/%02u/%02u %02u:%02u:%02u"),
-             now.year(), now.month(), now.day(),
-             now.hour(), now.minute(), now.second());
-  
-    // CORRECTED: Get timezone info from our RTC module, not directly from EEPROM
-    int timezone = rtc_get_timezone_offset();
-    String timezoneStr = timezone >= 0 ? "+" + String(timezone) : String(timezone);
-    
-    String card = "<div class='card'><h2>System Clock</h2><div class='info-grid'>";
-    card += generateInfoItem("Current Day", getDayOfWeek(now.dayOfTheWeek()));
-    card += generateInfoItem("Current Time", String(datestring));
-    card += generateInfoItem("Timezone", "UTC" + timezoneStr);
-    card += generateInfoItem("DST Active", rtc_is_dst(now) ? "Yes" : "No");
-    card += "<div class='button-section'>";
-    card += "<a href='/' class='button'>Refresh</a>";
-    card += "</div>";
-    card += "</div></div>";
-    return card;
-}
-
-String generateFirmwareVersionCard() {
-  String card = "<div class='card'><h2>System Information</h2><div class='info-grid'>";
-  card += generateInfoItem("Firmware Version", "4.0");
-    if (WiFi.status() == WL_CONNECTED) {
-    card += generateInfoItem("Local IP", WiFi.localIP().toString());
-  } else {
-    card += generateInfoItem("Local IP", "Not Connected");
-  }
-  
-  // Also show AP IP address since we're in AP+STA mode
-  card += generateInfoItem("AP IP", WiFi.softAPIP().toString());
-  card += "</div></div>";
-  return card;
-}
-
-String generateFormValidation() {
-    return F(
-        "<script>"
-            "function validateForm() {"
-                "var errorMessage = '';"
-                "var year = parseInt(document.getElementById('year').value);"
-                "var month = parseInt(document.getElementById('month').value);"
-                "var day = parseInt(document.getElementById('day').value);"
-                "var hour = parseInt(document.getElementById('hour').value);"
-                "var minute = parseInt(document.getElementById('minute').value);"
-                "var second = parseInt(document.getElementById('second').value);"
-                
-                // Check for valid numeric inputs
-                "if (isNaN(year) || isNaN(month) || isNaN(day) || isNaN(hour) || isNaN(minute) || isNaN(second)) {"
-                    "errorMessage = 'Please enter valid numeric values for all fields.';"
-                "} else if (year < 2000 || year > 2099) {"
-                    "errorMessage = 'Invalid year. Please enter a year between 2000 and 2099.';"
-                "} else if (month < 1 || month > 12) {"
-                    "errorMessage = 'Invalid month. Please enter a month between 1 and 12.';"
-                "} else if (day < 1 || day > getDaysInMonth(month, year)) {"
-                    "errorMessage = 'Invalid day for the selected month and year.';"
-                "} else if (hour < 0 || hour > 23) {"
-                    "errorMessage = 'Invalid hour. Please enter an hour between 0 and 23.';"
-                "} else if (minute < 0 || minute > 59) {"
-                    "errorMessage = 'Invalid minute. Please enter a minute between 0 and 59.';"
-                "} else if (second < 0 || second > 59) {"
-                    "errorMessage = 'Invalid second. Please enter a second between 0 and 59.';"
-                "}"
-                
-                "var errorElement = document.getElementById('errorMessage');"
-                "var submitButton = document.querySelector('.submit-button');"
-                
-                "if (errorMessage) {"
-                    "if (errorElement) errorElement.innerHTML = errorMessage;"
-                    "if (submitButton) submitButton.disabled = false;"
-                    "return false;"
-                "}"
-                
-                "if (errorElement) errorElement.innerHTML = 'Updating clock...';"
-                "if (submitButton) submitButton.disabled = true;"
-                
-                "const form = document.getElementById('updateTimeForm');"
-                "if (!form) {"
-                    "if (errorElement) errorElement.innerHTML = 'Form not found.';"
-                    "if (submitButton) submitButton.disabled = false;"
-                    "return false;"
-                "}"
-                
-                "const formData = new FormData(form);"
-                
-                "fetch('/update-time', {"
-                    "method: 'POST',"
-                    "body: formData,"
-                    "signal: AbortSignal.timeout(10000)" // 10-second timeout
-                "})"
-                ".then(response => {"
-                    "if (!response.ok) {"
-                        "throw new Error('Failed to update clock: ' + response.statusText);"
-                    "}"
-                    "return response.text();"
-                "})"
-                ".then(() => {"
-                    "window.location.href = '/rtc-update?success=true';"
-                "})"
-                ".catch(error => {"
-                    "if (errorElement) errorElement.innerHTML = error.message;"
-                    "if (submitButton) submitButton.disabled = false;"
-                "});"
-                
-                "return false;"
-            "}"
-            
-            // Helper function to calculate days in a month
-            "function getDaysInMonth(month, year) {"
-                "if (month === 2) {"
-                    "if ((year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0)) {"
-                        "return 29;" // Leap year
-                    "}"
-                    "return 28;"
-                "}"
-                "const daysInMonth = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];"
-                "return daysInMonth[month - 1];"
-            "}"
-        "</script>"
-    );
-}
-
-String generateUpdateTimeForm() {
-    String html = F("<div class='card time-update-card'>");
-    html += F("<h2>Update System Clock</h2>");
-    html += generateTimeFormFields();
-    html += generateFormValidation();
-    html += F("</div>");
-    return html;
-}
-
-// In main.cpp
-String getDeviceName() {
-    uint8_t mac[6];
-    WiFi.macAddress(mac);
-    char deviceName[15];
-    snprintf(deviceName, sizeof(deviceName), "PowerMate-%02X%02X", mac[4], mac[5]);
-    return String(deviceName);
-}
-
-
-void dumpEEPROM(int start, int end) {
-    Serial.printf("EEPROM dump from %d to %d:\n", start, end);
-    for (int i = start; i <= end; i++) {
-        if ((i - start) % 16 == 0) Serial.println();
-        Serial.printf("%02X ", EEPROM.read(i));
-    }
-    Serial.println();
-}
-
-void verifyEEPROMWrite(int address, TriggerTime& timer) {
-    TriggerTime readTimer;
-    EEPROM.get(address, readTimer);
-    if (readTimer.hour != timer.hour ||
-        readTimer.minute != timer.minute ||
-        readTimer.second != timer.second ||
-        readTimer.activationDuration != timer.activationDuration ||
-        readTimer.delayBetweenActivations != timer.delayBetweenActivations ||
-        readTimer.repetitions != timer.repetitions) {
-        Serial.printf("EEPROM write verification failed at address %d\n", address);
-        Serial.printf("Expected: Hour=%d, Minute=%d, ActDur=%lu, Delay=%lu, Reps=%d\n",
-                      timer.hour, timer.minute, timer.activationDuration,
-                      timer.delayBetweenActivations, timer.repetitions);
-        Serial.printf("Read: Hour=%d, Minute=%d, ActDur=%lu, Delay=%lu, Reps=%d\n",
-                      readTimer.hour, readTimer.minute, readTimer.activationDuration,
-                      readTimer.delayBetweenActivations, readTimer.repetitions);
-    }
-}
-
 void setup() {
+    esp_task_wdt_init(30, true);  // 30s timeout, true = panic/reboot on trigger
+    esp_task_wdt_add(NULL);       // Watch the current (main Arduino) task
     esp_log_level_set("*", ESP_LOG_WARN); // Show only warnings and errors
     Serial.begin(115200);
     pinMode(relayPin, OUTPUT);
@@ -337,11 +134,11 @@ void setup() {
     rtc_init();
     storage_load_settings(numberOfTimers, triggerDays, days);
     logIndex = storage_load_logs_from_file(relayLog, MAX_LOG_ENTRIES);
-
+    storage_load_mqtt_config(mqttServer, MAX_IP_LENGTH, mqttUser, sizeof(mqttUser), mqttPassword, sizeof(mqttPassword));
     for (int i = 0; i < safeNumberOfTimers(); i++) {
-        resetTimerState(i);
+        resetTriggerState(i);
     }
-    startupMillis = millis();
+    
     Serial.printf("Number of timers: %d\n", safeNumberOfTimers());
     for (int i = 0; i < safeNumberOfTimers(); i++) {
         Serial.printf("Timer %d: %02d:%02d, Duration: %lu, Delay: %lu, Repetitions: %d\n",
@@ -360,124 +157,258 @@ void setup() {
     
     web_server_init(); 
     Serial.println("Web server created");
-
-    setupOTA();
-    Serial.println("OTA setup complete");
-    //logRTCTime("Setup");
     Serial.println("Setup complete");
 
-    shouldAttemptMqttConnection = true; // Trigger MQTT connection attempt on boot
-
+    const esp_timer_create_args_t timer_args = {
+        .callback = &relayCheckCallback,
+        .name = "relay_check"
+    };
+    esp_timer_create(&timer_args, &relay_timer);
+    esp_timer_start_periodic(relay_timer, CHECK_INTERVAL * 1000); // µs
 }
 
 void loop() {
-    static int reconnectCount = 0;
-    static unsigned long lastReconnectAttempt = 0;
-    const int MAX_RECONNECT_ATTEMPTS = 3;
-    const unsigned long RECONNECT_RESET_INTERVAL = 300000; // 5 minutes
-
-    wifi_check_status();  // This handles NTP sync when connecting to external AP
-    ArduinoOTA.handle();
+    esp_task_wdt_reset();
+    wifi_check_status();  // Monitors connection, triggers reconnect if lost
+    if (wifi_is_connected()) {
+        ArduinoOTA.handle();
+    }
     web_server_handle_client();
+
+
+    // Process deferred relay actions from timer callback
+    if (pendingTimerCheck) {
+        // Clear flag immediately to avoid re-entrancy
+        pendingTimerCheck = false;
+
+        // Perform an RTC read here (safe context) and run timer logic
+        lastCachedTime = rtc_get_current_time();
+        rtcCacheValid = rtc_is_ok() && lastCachedTime.isValid();
+        if (rtcCacheValid) {
+            checkAndActivateTimers(lastCachedTime);
+        } else {
+            Serial.println("[WARN] Skipping timer processing: RTC not valid");
+        }
+    }
     
     if (shouldAttemptMqttConnection) {
-        // If already connected, disconnect first to use new settings
-        if (mqttClient.connected()) {
-            mqttClient.disconnect();
-            Serial.println("Disconnected existing MQTT connection.");
+        if (!wifi_is_connected()) {
+            // Silently skip — will retry next loop iteration
+        } else if (mqttServer == nullptr || strlen(mqttServer) == 0) {
+            Serial.println("MQTT skipped: no valid server address configured");
+            shouldAttemptMqttConnection = false; 
+        } else {
+            Serial.println("Starting MQTT connection...");
+            setupMQTT();
+            shouldAttemptMqttConnection = false;
+            lastMqttReconnectAttempt = millis();
         }
+    }
+    
+    // Automatic MQTT reconnection if disconnected and enough time has passed
+    if (wifi_is_connected() && !mqttConnected && mqttServer != nullptr && strlen(mqttServer) > 0) {
+        unsigned long now = millis();
+        if (now - lastMqttReconnectAttempt > MQTT_RECONNECT_INTERVAL) {
+            Serial.printf("[MQTT] Attempting automatic reconnection (last attempt: %lu ms ago)\n", now - lastMqttReconnectAttempt);
+            setupMQTT();
+            lastMqttReconnectAttempt = now;
+        }
+    } 
+    
+    // Process any pending MQTT messages that need to be retried
+    processPendingMQTTMessages(); 
+    
+    // Update cached RTC time with timeout protection
+    // Only attempt RTC read if enough time has passed since last update
+    static unsigned long lastRtcReadTime = 0;
+    
+    if (!rtcCacheInitialized || (millis() - lastRtcReadTime > 1000)) {  // Update every 1 second instead of 5
+        lastRtcReadTime = millis();
+        rtcCacheInitialized = true;
         
-        Serial.println("Starting MQTT connection attempts...");
-        setupMQTT(); // This function already contains the 3-attempt logic
-        shouldAttemptMqttConnection = false; // Reset the flag so it only runs once per trigger
+        lastCachedTime = rtc_get_current_time();
+        rtcCacheValid = rtc_is_ok() && lastCachedTime.isValid();
+        
+        if (rtcCacheValid) {
+            esp_task_wdt_reset();
+        } else {
+            Serial.println("[WARNING] Failed to cache RTC time");
+        }
     }
-    if (mqttClient.connected()) {
-        mqttClient.loop();
-    }  
-    DateTime now = rtc_get_current_time();
-     
-    uint32_t currentTime = now.unixtime();
-   
-    static uint32_t lastCheckTime = 0;
-    if (currentTime - lastCheckTime >= CHECK_INTERVAL / 1000) {  // Convert CHECK_INTERVAL to seconds
-        lastCheckTime = currentTime;
-        syncDeviceState();
-        checkAndActivateTimers();
-    }
+}   
 
-    }
-
-void logRTCTime(const char* context) {
-    DateTime now = rtc_get_current_time();
-    Serial.printf("[%s] Local time: %04d-%02d-%02d %02d:%02d:%02d\n", 
-                  context, now.year(), now.month(), now.day(),
-                  now.hour(), now.minute(), now.second());
-}
-
-void startAPMode() {
-    WiFi.mode(WIFI_AP);
-    WiFi.softAP("PowerMate-ESP32", "powermate123");
-    Serial.println("AP Mode started");
-    Serial.print("AP IP address: ");
-    Serial.println(WiFi.softAPIP());
+void relayCheckCallback(void* arg) {
+    // Keep this callback minimal and safe: only set a flag for the main loop to perform
+    // heavier operations (RTC reads, timer checks, filesystem, MQTT, etc.).
+    pendingTimerCheck = true;
 }
 
 void setupMQTT() {
-    // Ensure the MQTT IP is loaded from EEPROM
-    if (mqttServer == nullptr || strlen(mqttServer) == 0) {
-        Serial.println("No valid MQTT IP loaded. Using default.");
-        mqttServer = "192.168.0.27"; // Default MQTT IP
+    Serial.printf("Connecting to MQTT Server: %s:%d\n", mqttServer, mqttPort);
+
+    // Build URI from host and port
+    char mqtt_uri[256];
+    snprintf(mqtt_uri, sizeof(mqtt_uri), "mqtt://%s:%d", mqttServer, mqttPort);
+    
+    esp_mqtt_client_config_t mqtt_cfg = {
+        .uri = mqtt_uri,
+        .client_id = "powermateClient",
+        .username = strlen(mqttUser) > 0 ? mqttUser : nullptr,
+        .password = strlen(mqttPassword) > 0 ? mqttPassword : nullptr,
+    };
+
+    // Guard: destroy existing client before creating a new one
+    if (mqttClient != NULL) {
+        esp_mqtt_client_stop(mqttClient);
+        esp_mqtt_client_destroy(mqttClient);
+        mqttClient = NULL;
     }
 
-    Serial.printf("Using MQTT Server: %s\n", mqttServer);
+    mqttClient = esp_mqtt_client_init(&mqtt_cfg);
+    if (mqttClient == NULL) {
+        Serial.println("MQTT ERROR: esp_mqtt_client_init failed — out of memory?");
+        return;
+    }
 
-    mqttClient.setServer(mqttServer, mqttPort);
-    mqttClient.setCallback(mqttCallback);
+    esp_err_t err = esp_mqtt_client_register_event(mqttClient,
+        MQTT_EVENT_ANY, mqtt_event_handler, NULL);
+    if (err != ESP_OK) {
+        Serial.printf("MQTT ERROR: register_event failed: %d\n", err);
+        esp_mqtt_client_destroy(mqttClient);
+        mqttClient = NULL;
+        return;
+    }
 
-    int retryCount = 0;
-    while (!mqttClient.connected() && retryCount < 3) {
-        Serial.printf("Connecting to MQTT broker... (Attempt %d/3)\n", retryCount + 1);
-        if (mqttClient.connect("powermateClient")) {
+    err = esp_mqtt_client_start(mqttClient);
+    if (err != ESP_OK) {
+        Serial.printf("MQTT ERROR: client_start failed: %d\n", err);
+        esp_mqtt_client_destroy(mqttClient);
+        mqttClient = NULL;
+        return;
+    }
+
+    Serial.println("MQTT client started successfully");
+}
+
+static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data) {
+    esp_mqtt_event_handle_t event = (esp_mqtt_event_handle_t)event_data;
+    switch ((esp_mqtt_event_id_t)event_id) {
+        case MQTT_EVENT_CONNECTED:
             Serial.println("Connected to MQTT broker");
-            mqttClient.subscribe(mqttTopic); // Subscribe to the control topic
-            Serial.printf("Subscribed to topic: %s\n", mqttTopic);
-            break;
-        } else {
-            Serial.printf("Failed to connect to MQTT broker, rc=%d. Retrying in 5 seconds...\n", mqttClient.state());
-            retryCount++;
-            if (retryCount < 3) {
-                delay(5000);
+            mqttConnected = true;
+            if (mqttClient != NULL) {
+                esp_mqtt_client_subscribe(mqttClient, mqttTopic, 0);
+                Serial.printf("Subscribed to topic: %s\n", mqttTopic);
+                
+                static bool startupSent = false;
+                if (!startupSent) {
+                    publishMQTTMessage("startup");
+                    startupSent = true;
+                }
             }
-        }
-    }
-    if (retryCount >= 3) {
-        Serial.println("Failed to connect to MQTT broker after 3 attempts. Will try again later.");
+            break;
+        case MQTT_EVENT_DISCONNECTED:
+            Serial.println("Disconnected from MQTT broker");
+            mqttConnected = false;
+            lastMqttReconnectAttempt = millis(); // Allow immediate reconnection attempt
+            break;
+        case MQTT_EVENT_DATA:
+            {
+                String topic = String(event->topic, event->topic_len);
+                String message = String(event->data, event->data_len);
+                message.trim(); // Remove any whitespace
+                Serial.printf("MQTT message received on topic '%s': '%s' (len=%d)\n", topic.c_str(), message.c_str(), message.length());
+
+                if (topic == mqttTopic) {
+                    if (message.equalsIgnoreCase("on")) {
+                        if (turnDeviceOn()) {
+                            Serial.println("Device turned on via MQTT");
+                        } else {
+                            Serial.println("Failed to turn device on via MQTT");
+                        }
+                    } else if (message.equalsIgnoreCase("off")) {
+                        if (turnDeviceOff()) {
+                            Serial.println("Device turned off via MQTT");
+                        } else {
+                            Serial.println("Failed to turn device off via MQTT");
+                        }
+                    } else {
+                        Serial.println("Invalid MQTT message");
+                    }
+                }
+            }
+            break;
+        default:
+            break;
     }
 }
 
-void mqttCallback(char* topic, byte* payload, unsigned int length) {
-    String message;
-    for (unsigned int i = 0; i < length; i++) {
-        message += (char)payload[i];
+void publishMQTTMessage(const char* message) {
+    Serial.printf("publishMQTTMessage called with: %s\n", message);
+    Serial.printf("mqttConnected: %d, mqttClient: %p, mqttServer: '%s'\n", mqttConnected, mqttClient, mqttServer);
+    
+    // Try to publish immediately if MQTT is connected
+    if (mqttConnected && mqttClient != NULL && strlen(mqttServer) > 0) {
+        Serial.printf("Attempting to publish to %s: %s\n", mqttStatusTopic, message);
+        int msg_id = esp_mqtt_client_publish(mqttClient, mqttStatusTopic, message, 0, 1, 0);
+        if (msg_id != -1) {
+            Serial.printf("MQTT published to %s: %s (msg_id: %d)\n", mqttStatusTopic, message, msg_id);
+            return;  // Success, don't queue
+        }
+        Serial.println("MQTT publish failed, queuing for retry");
+    } else {
+        Serial.println("MQTT not connected, queuing message");
     }
+    
+    // If we got here, add to queue for retry
+    if (pendingMessageCount < MAX_PENDING_MESSAGES) {
+        strlcpy(pendingMessages[pendingMessageCount].payload, message, sizeof(pendingMessages[0].payload));
+        pendingMessages[pendingMessageCount].lastAttemptTime = millis();
+        pendingMessages[pendingMessageCount].retryCount = 0;
+        pendingMessageCount++;
+        Serial.printf("Message queued. Pending messages: %d\n", pendingMessageCount);
+    } else {
+        Serial.println("ERROR: Message queue full, message dropped");
+    }
+}
 
-    Serial.printf("MQTT message received on topic %s: %s\n", topic, message.c_str());
-
-    if (String(topic) == mqttTopic) {
-        if (message == "on") {
-            if (turnDeviceOn()) {
-                Serial.println("Device turned on via MQTT");
+void processPendingMQTTMessages() {
+    if (pendingMessageCount == 0 || !mqttConnected || mqttClient == NULL) {
+        return;
+    }
+    
+    unsigned long now = millis();
+    for (int i = 0; i < pendingMessageCount; i++) {
+        // Check if enough time has passed for retry
+        if (now - pendingMessages[i].lastAttemptTime >= MQTT_RETRY_DELAY) {
+            Serial.printf("Retrying queued message: %s (attempt %d)\n", pendingMessages[i].payload, pendingMessages[i].retryCount + 1);
+            
+            int msg_id = esp_mqtt_client_publish(mqttClient, mqttStatusTopic, pendingMessages[i].payload, 0, 1, 0);
+            
+            if (msg_id != -1) {
+                // Success, remove from queue
+                Serial.printf("Queued message published successfully: %s\n", pendingMessages[i].payload);
+                // Shift remaining messages
+                for (int j = i; j < pendingMessageCount - 1; j++) {
+                    pendingMessages[j] = pendingMessages[j + 1];
+                }
+                pendingMessageCount--;
+                i--;  // Recheck this index since we shifted
             } else {
-                Serial.println("Failed to turn device on via MQTT");
+                // Retry failed, increment attempt count
+                pendingMessages[i].lastAttemptTime = now;
+                pendingMessages[i].retryCount++;
+                
+                // Give up after 5 retries
+                if (pendingMessages[i].retryCount >= 5) {
+                    Serial.printf("ERROR: Message failed after 5 retries, dropping: %s\n", pendingMessages[i].payload);
+                    for (int j = i; j < pendingMessageCount - 1; j++) {
+                        pendingMessages[j] = pendingMessages[j + 1];
+                    }
+                    pendingMessageCount--;
+                    i--;  // Recheck this index since we shifted
+                }
             }
-        } else if (message == "off") {
-            if (turnDeviceOff()) {
-                Serial.println("Device turned off via MQTT");
-            } else {
-                Serial.println("Failed to turn device off via MQTT");
-            }
-        } else {
-            Serial.println("Invalid MQTT message");
         }
     }
 }
@@ -494,228 +425,103 @@ bool readRelayState() {
     return digitalRead(relayPin) == HIGH;
 }
 
-String generateTimeFormFields() {
-    int timezone = rtc_get_timezone_offset();
-    String html = "<form id='updateTimeForm' class='time-update-form' action='/update-time' method='POST' onsubmit='return validateForm()'>";
-    
-    // DST Checkbox
-    html += "<div class='form-group' style='grid-column: 1 / -1; flex-direction: row; align-items: center;'>";
-    html += "<label for='useDST' style='margin-right: 10px;'>Enable Daylight Saving Time:</label>";
-    html += "<input type='checkbox' id='useDST' name='useDST' value='1'";
-    if (rtc_is_dst_enabled()) {
-        html += " checked";
-    }
-    html += "></div>";
-    
-    // Timezone Select
-    html +=  "<div class='form-group'>"
-             "<label for='timezone'>Timezone:</label>"
-             "<select id='timezone' name='timezone' required>";
-        
-    // Add all timezone options
-    const char* cities[] = {
-        " (Baker Island)", " (American Samoa)", " (Hawaii)", " (Alaska)", 
-        " (Los Angeles)", " (Denver)", " (Chicago)", " (New York)",
-        " (Santiago)", " (São Paulo)", " (South Georgia)", " (Azores)",
-        " (London)", " (Paris, Berlin)", " (Cairo, Kiev)", " (Moscow)",
-        " (Dubai)", " (Karachi)", " (Dhaka)", " (Bangkok)",
-        " (Singapore, Beijing)", " (Tokyo)", " (Sydney)", 
-        " (Solomon Islands)", " (Auckland)"
-    };
- 
-    for (int i = -12; i <= 12; i++) {
-        html += "<option value='" + String(i) + "'";
-        if (i == timezone) {
-            html += " selected";
-        }
-        html += ">UTC" + (i >= 0 ? "+" + String(i) : String(i));
-        html += cities[i + 12];
-        html += "</option>";
-    }
- 
-    html += "</select></div>";
+bool shouldActivateTimer(int idx, const DateTime& now)
+{
+    //Serial.printf("[DEBUG] shouldActivateTimer called for Timer %d at time %02d:%02d\n", idx, now.hour(), now.minute());
+    const TriggerTime& t = triggerDays[idx];
+    TriggerState& s = triggerStates[idx];
 
-    // Date and Time Input Fields
-    html += "<div class='form-group'>"
-            "<label for='year'>Year:</label>"
-            "<input type='number' id='year' name='year' placeholder='Year' min='2024' max='2099' required>"
-            "</div>"
-            "<div class='form-group'>"
-            "<label for='month'>Month:</label>"
-            "<input type='number' id='month' name='month' placeholder='Month' min='1' max='12' required>"
-            "</div>"
-            "<div class='form-group'>"
-            "<label for='day'>Day:</label>"
-            "<input type='number' id='day' name='day' placeholder='Day' min='1' max='31' required>"
-            "</div>"
-            "<div class='form-group'>"
-            "<label for='hour'>Hour:</label>"
-            "<input type='number' id='hour' name='hour' placeholder='Hour' min='0' max='23' required>"
-            "</div>"
-            "<div class='form-group'>"
-            "<label for='minute'>Minute:</label>"
-            "<input type='number' id='minute' name='minute' placeholder='Minute' min='0' max='59' required>"
-            "</div>"
-            "<div class='form-group'>"
-            "<label for='second'>Second:</label>"
-            "<input type='number' id='second' name='second' placeholder='Second' min='0' max='59' required>"
-            "</div>";
-
-    // Buttons
-    html += "<div class='button-grid'>"
-            "<button type='submit' class='submit-button'>Update Clock</button>"
-            "<a href='/' class='button'>Back to Dashboard</a>"
-            "</div>"
-            "</form>"
-            "<div id='errorMessage' style='color: red;'></div>";
-
-    return html;
-}
-
-bool validateTime(const DateTime& time) {
-    return time.isValid() && 
-           time.year() >= 2024 && time.year() <= 2099 &&
-           time.hour() < 24 && time.minute() < 60 && time.second() < 60;
-}
-
-bool validateTimerSettings(const TriggerTime& timer) {
-
-    return timer.hour < 24 && 
-           timer.minute < 60 && 
-           timer.activationDuration > 0 &&
-           timer.delayBetweenActivations > 0 &&
-           timer.repetitions >= 0;
-}
-
-bool shouldActivateTimer(int timerIndex, DateTime now) {
-    if (triggerStates[timerIndex].activations >= triggerDays[timerIndex].repetitions) {
+    if (s.activations >= t.repetitions)
+       // Serial.printf("[DEBUG] Timer %d: Max repetitions (%d) reached, skipping.\n", idx, t.repetitions);
         return false;
+
+    if (s.firstActivationPending) {
+        bool timeMatch = now.hour() == t.hour && now.minute() == t.minute;
+        //Serial.printf("[DEBUG] Timer %d: First activation check - Time match: %s (Now: %02d:%02d, Scheduled: %02d:%02d)\n", 
+        //              idx, timeMatch ? "YES" : "NO", now.hour(), now.minute(), t.hour, t.minute);
+        return timeMatch;
     }
 
-    uint32_t delayInSeconds = triggerDays[timerIndex].delayBetweenActivations / 1000;
-    uint32_t timeSinceLastDeactivation = getTimeDifference(now, 
-        DateTime(triggerStates[timerIndex].lastDeactivationTime));
-
-    return (triggerDays[timerIndex].hour == now.hour() && 
-            triggerDays[timerIndex].minute == now.minute()) ||
-           (triggerStates[timerIndex].lastDeactivationTime != 0 &&
-            timeSinceLastDeactivation >= delayInSeconds);
-}
-
-bool shouldDeactivateTimer(int timerIndex, DateTime now) {
-    if (!triggerStates[timerIndex].active) return false;
-    
-    uint32_t activationDuration = getTimeDifference(now, 
-        DateTime(triggerStates[timerIndex].startTime));
-        
-    return activationDuration >= triggerDays[timerIndex].activationDuration / 1000;
-}
-
-void updateTimerStateForActivation(int timerIndex, DateTime now) {
-    triggerStates[timerIndex].active = true;
-    triggerStates[timerIndex].startTime = now.unixtime();
-    triggerStates[timerIndex].activations++;
-    triggerStates[timerIndex].firstActivationPending = false;
-}
-
-void updateTimerStateForDeactivation(int timerIndex, DateTime now) {
-    triggerStates[timerIndex].active = false;
-    triggerStates[timerIndex].lastDeactivationTime = now.unixtime();
-}
-
-bool handleTimerStateChange(int timerIndex, DateTime now) {
-    if (!triggerStates[timerIndex].active) {
-        // Device is OFF - check if it should turn ON
-        if (shouldActivateTimer(timerIndex, now)) {
-            if (!turnDeviceOn()) {
-                resetTriggerState(timerIndex);
+    // Subsequent activations: check delay
+    if (s.lastDeactivationTime == 0) {
+            //  Serial.printf("[DEBUG] Timer %d: No last deactivation time, skipping delay check.\n", idx);
                 return false;
-            }
-            updateTimerStateForActivation(timerIndex, now);
-        }
-    } else {
-        // Device is ON - check if it should turn OFF
-        if (shouldDeactivateTimer(timerIndex, now)) {
-            if (!turnDeviceOff()) {
-                resetTriggerState(timerIndex);
-                return false;
-            }
-            updateTimerStateForDeactivation(timerIndex, now);
-        }
     }
-    return true;
+        uint32_t nowu = now.unixtime();
+        uint32_t last = s.lastDeactivationTime;
+        uint32_t elapsed = nowu >= last ? nowu - last : (uint32_t)(nowu + (UINT32_MAX - last) + 1);
+        bool delayElapsed = elapsed >= t.delayBetweenActivations;
+        //Serial.printf("[DEBUG] Timer %d: Delay check - now=%lu, lastDeact=%lu, Elapsed: %lu sec, Delay: %lu sec, Delay elapsed: %s\n",
+        //                            idx, nowu, last, elapsed, t.delayBetweenActivations, delayElapsed ? "YES" : "NO");
+        return delayElapsed;
 }
 
-uint32_t getTimeDifference(DateTime current, DateTime previous) {   //Function to convert unix time to avoid unixtimestamp overflow
-    if (!current.isValid() || !previous.isValid()) return 0;
-    
-    uint32_t currentSeconds = 
-        current.hour() * 3600 + 
-        current.minute() * 60 + 
-        current.second();
-        
-    uint32_t previousSeconds = 
-        previous.hour() * 3600 + 
-        previous.minute() * 60 + 
-        previous.second();
-        
-    return currentSeconds >= previousSeconds ? 
-           currentSeconds - previousSeconds : 
-           (24 * 3600) - (previousSeconds - currentSeconds);
+bool shouldDeactivateTimer(int idx, const DateTime& now)
+{
+    if (!triggerStates[idx].active) return false;
+
+    // Prevent immediate deactivation if activationDuration is 0 or invalid
+    uint32_t duration = triggerDays[idx].activationDuration;
+    if (duration == 0) return false;  // Never deactivate if duration is 0
+
+    uint32_t nowu = now.unixtime();
+    uint32_t start = triggerStates[idx].startTime;
+    uint32_t elapsed = nowu >= start ? nowu - start : (uint32_t)(nowu + (UINT32_MAX - start) + 1);
+    //Serial.printf("[DEBUG] Timer %d deactivate check: now=%lu, start=%lu, elapsed=%lu, duration=%lu\n",
+    //              idx, nowu, start, elapsed, duration);
+    return elapsed >= duration;
 }
 
-uint32_t getTimeSinceLastDeactivation(const DateTime& now, uint32_t lastDeactivationTime) {
-    if (lastDeactivationTime == 0) return 0;
-    return now.unixtime() - lastDeactivationTime;
-}
-
-void checkAndActivateTimers() {
+void checkAndActivateTimers(const DateTime& now) {
     //Serial.println("Starting checkAndActivateTimers");
 
     if (bypassModeEnabled) {
-        Serial.println("Bypass mode is enabled. Skipping timer checks.");
-        return; // Skip all timer checks
+        Serial.println("[DEBUG] Bypass mode enabled, skipping timer checks.");
+        return;
     }
-
     if (!rtc_is_ok()) {
-        Serial.println("RTC validation failed, skipping timer checks");
+        Serial.println("[DEBUG] RTC not OK, skipping timer checks.");
         return;
     }
-    
-    DateTime now = rtc_get_current_time();
     if (!now.isValid()) {
-        Serial.println("Invalid time detected, skipping timer checks");
+        Serial.println("[DEBUG] Invalid RTC time, skipping.");
         return;
     }
 
-    resetActivationsOnDayChange();
+    resetActivationsOnDayChange(now);
 
-    int currentDay = now.dayOfTheWeek(); // Get the current day of the week (0 = Sunday, 6 = Saturday)
-    byte currentHour = now.hour();
-    byte currentMinute = now.minute();
+    int currentDay = now.dayOfTheWeek();
+   
     
-    for (int i = 0; i < safeNumberOfTimers(); i++) {
-        // Check if the current day is active
-        if (days[currentDay] == 0) {
-           // Serial.printf("Timer %d skipped because today is not an active day\n", i);
-            continue; // Skip this timer if the current day is not active
+    //Serial.printf("[DEBUG] Current time: %02d:%02d:%02d, Day: %d\n", curHour, curMin, currentDay);
+
+    for (int i  = 0; i < safeNumberOfTimers(); ++i) {
+        //Serial.printf("[DEBUG] Checking Timer %d: Active=%s, Day enabled=%d\n", 
+        //              i, triggerStates[i].active ? "YES" : "NO", days[currentDay]);
+        
+        bool inProgress = triggerStates[i].active || (!triggerStates[i].firstActivationPending && triggerStates[i].activations < triggerDays[i].repetitions);
+        
+        if (days[currentDay] == 0 && !inProgress) {
+            // Serial.printf("[DEBUG] Timer %d: Day not enabled, skipping.\n", i);
+            continue;
         }
 
-        uint32_t delayInSeconds = triggerDays[i].delayBetweenActivations / 1000;
-        uint32_t timeSinceLastDeactivation = getTimeSinceLastDeactivation(now, triggerStates[i].lastDeactivationTime);
-        
-        bool isCorrectTime = (triggerDays[i].hour == currentHour && 
-                            triggerDays[i].minute == currentMinute) ||
-                            (triggerStates[i].lastDeactivationTime != 0 && 
-                             timeSinceLastDeactivation >= delayInSeconds);
+        // If timer is completed and we are no longer in the trigger minute, reset it.
+        if (!triggerStates[i].active && 
+            !triggerStates[i].firstActivationPending && 
+            triggerStates[i].activations >= triggerDays[i].repetitions) 
+        {
+            if (now.hour() != triggerDays[i].hour || now.minute() != triggerDays[i].minute) {
+                resetTriggerState(i);
+                Serial.printf("Timer %d reset after completion.\n", i);
+                continue; // Skip the rest of the checks for this timer
+            }
+        }
 
         if (!triggerStates[i].active) {
-            if (triggerStates[i].activations >= triggerDays[i].repetitions) {
-                //Serial.printf("All repetitions (%d) completed for today\n", triggerDays[i].repetitions);
-                continue;
-            }
-
-            if (isCorrectTime && (triggerStates[i].firstActivationPending || timeSinceLastDeactivation >= delayInSeconds)) {
+            bool shouldActivate = shouldActivateTimer(i, now);
+            Serial.printf("[DEBUG] Timer %d: Should activate? %s\n", i, shouldActivate ? "YES" : "NO");
+            if (shouldActivate) {
                 Serial.println("Conditions met for activation.");
                 if (turnDeviceOn()) {
                     triggerStates[i].active = true;
@@ -726,22 +532,24 @@ void checkAndActivateTimers() {
                 }
             }
         } else {
-            uint32_t activationDuration = now.unixtime() - triggerStates[i].startTime;
-            uint32_t requiredDuration = triggerDays[i].activationDuration / 1000; // Convert to seconds
-            //Serial.printf("Timer %d: Current duration %lu seconds, Required duration %lu seconds\n", 
-            //             i, activationDuration, requiredDuration);
+            uint32_t nowu = now.unixtime();
+            uint32_t start = triggerStates[i].startTime;
+            uint32_t activationDuration = nowu >= start ? nowu - start : (uint32_t)(nowu + (UINT32_MAX - start) + 1);
+            uint32_t requiredDuration = triggerDays[i].activationDuration; // Stored in seconds
+            Serial.printf("[DEBUG] Timer %d deactivation check: now=%lu, start=%lu, elapsed=%lu, required=%lu\n",
+                         i, nowu, start, activationDuration, requiredDuration);
             if (activationDuration >= requiredDuration) {
                 if (turnDeviceOff()) {
                     triggerStates[i].active = false;
                     triggerStates[i].lastDeactivationTime = now.unixtime();
-                    Serial.printf("Timer %d deactivated. Next activation in %d seconds.\n", i, delayInSeconds);
-                }
+                    Serial.printf("Timer %d deactivated after %lu seconds.\n", i, activationDuration);  }
             }
         }
     }
 }
 
 bool turnDeviceOn() {
+    //Serial.printf("[DEBUG] Attempting to turn relay ON (pin %d)...\n", relayPin);
     digitalWrite(relayPin, HIGH);
     Serial.println(digitalRead(relayPin));
     delay(50);
@@ -752,9 +560,12 @@ bool turnDeviceOn() {
       LogEntry newLog;
       newLog.unix_time = rtc_get_current_time().unixtime(); // Get current time
       newLog.relayState = true;
+      strlcpy(newLog.action, "ON", sizeof(newLog.action));
+      newLog.duration = 0; // Duration will be calculated when reading logs
       Serial.println("[main.cpp] Requesting to log ON action..."); 
       storage_log_to_file(newLog);// First, write the log to the permanent file
       add_log_to_ram_buffer(newLog);// THEN, update the live RAM buffer for the web page
+      publishMQTTMessage("on");
     }
     return success;
 }
@@ -770,35 +581,44 @@ bool turnDeviceOff() {
       LogEntry newLog;
       newLog.unix_time = rtc_get_current_time().unixtime(); // Get current time
       newLog.relayState = false;
+      strlcpy(newLog.action, "OFF", sizeof(newLog.action));
+      newLog.duration = 0; // Duration will be calculated when reading logs
       Serial.println("[main.cpp] Requesting to log OFF action..."); 
       storage_log_to_file(newLog); // First, write the log to the permanent file
       add_log_to_ram_buffer(newLog); // THEN, update the live RAM buffer for the web page
+      publishMQTTMessage("off");
+    } else
+    {
+      Serial.println("Failed to turn device off.");
     }
     return success;
 }
 
-void resetActivationsOnDayChange() {
+void resetActivationsOnDayChange(const DateTime& now) {
     static int lastCheckedDay = -1;
-    DateTime now = rtc_get_current_time();
-    int currentDay = now.dayOfTheWeek();
+    int currentDay = now.dayOfTheWeek();  // use passed-in time, not a fresh RTC read
     
-    if (lastCheckedDay != currentDay) {
-        Serial.printf("Day change detected. Old day: %d, New day: %d\n", lastCheckedDay, currentDay);        
+    if (lastCheckedDay != currentDay && lastCheckedDay != -1) {
+        Serial.printf("Day change detected. Old day: %d, New day: %d\n", lastCheckedDay, currentDay);
         for (int i = 0; i < safeNumberOfTimers(); i++) {
-            triggerStates[i].activations = 0;
-            triggerStates[i].firstActivationPending = true;
-            triggerStates[i].lastDeactivationTime = 0;
+            bool inProgress = triggerStates[i].active || (!triggerStates[i].firstActivationPending && triggerStates[i].activations < triggerDays[i].repetitions);
             
-            if (triggerStates[i].active) {
-                turnDeviceOff();
-                triggerStates[i].active = false;
-                Serial.printf("Timer %d was active and stopped due to day change.\n", i);
+            if (!inProgress) {
+                triggerStates[i].activations = 0;
+                triggerStates[i].firstActivationPending = true;
+                triggerStates[i].lastDeactivationTime = 0;
+                if (triggerStates[i].active) {
+                    turnDeviceOff();
+                    triggerStates[i].active = false;
+                }
+                Serial.printf("Timer %d stopped/reset due to day change.\n", i);
+            } else {
+                Serial.printf("Timer %d is in progress, skipping day change reset to allow overnight completion.\n", i);
             }
-            
-            Serial.printf("Reset state for Timer %d\n", i);
         }
-        
         lastCheckedDay = currentDay;
+    } else if (lastCheckedDay == -1) {
+        lastCheckedDay = currentDay; // initialise on first call
     }
 }
 
@@ -812,68 +632,41 @@ void resetTriggerState(int i) {
 }
 
 void setupOTA() {
+    static bool otaInitialised = false;
+    if (otaInitialised) {
+        Serial.println("OTA already initialised, skipping");
+        return;
+    }
+
     ArduinoOTA.setHostname("PowerMate-ESP32");
     ArduinoOTA.onStart([]() {
         String type = ArduinoOTA.getCommand() == U_FLASH ? "sketch" : "filesystem";
-        Serial.println("Start updating " + type);
+        Serial.println("OTA Start: " + type);
+        // Stop MQTT cleanly before OTA overwrites firmware
+        if (mqttClient != NULL) {
+            esp_mqtt_client_stop(mqttClient);
+        }
     });
     ArduinoOTA.onEnd([]() {
-        Serial.println("\nEnd");
+        Serial.println("OTA End");
     });
     ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-        Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+        Serial.printf("OTA Progress: %u%%\r", (progress / (total / 100)));
     });
     ArduinoOTA.onError([](ota_error_t error) {
-        Serial.printf("Error[%u]: ", error);
-        if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-        else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+        Serial.printf("OTA Error[%u]: ", error);
+        if (error == OTA_AUTH_ERROR)    Serial.println("Auth Failed");
+        else if (error == OTA_BEGIN_ERROR)   Serial.println("Begin Failed");
         else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
         else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-        else if (error == OTA_END_ERROR) Serial.println("End Failed");
+        else if (error == OTA_END_ERROR)     Serial.println("End Failed");
     });
     ArduinoOTA.begin();
+    otaInitialised = true;
+    Serial.println("OTA initialised");
 }
 
-void resetTimerState(int timerId) {
-    if (timerId == 0) {
-        timer0Active = false; // Or some state reset
-        Serial.println("Reset state for Timer 0");
-    } else if (timerId == 1) {
-        timer1Active = false;
-        Serial.println("Reset state for Timer 1");
-    } else {
-        Serial.printf("Invalid timerId: %d\n", timerId);
-    }
+void wifi_notify_ap_ready() {
+    Serial.println("AP ready — starting OTA");
+    setupOTA();
 }
-
-void logInitialRTCTime() {
-    char datestring[20];
-    snprintf_P(datestring, 
-               sizeof(datestring),
-               PSTR("%04u/%02u/%02u %02u:%02u:%02u"),
-               initialRtcTime.year(),
-               initialRtcTime.month(),
-               initialRtcTime.day(),
-               initialRtcTime.hour(),
-               initialRtcTime.minute(),
-               initialRtcTime.second());
-    Serial.print("Initial RTC time: ");
-    Serial.println(datestring);
-}
-
-void logTimerState(int i) {
-    Serial.printf("Timer %d State:\n", i);
-    Serial.printf("  Set Time: %02d:%02d\n", triggerDays[i].hour, triggerDays[i].minute);
-    Serial.printf("  Activation Duration: %lu ms (%lu seconds)\n", 
-                  triggerDays[i].activationDuration, 
-                  triggerDays[i].activationDuration / 1000UL);
-    Serial.printf("  Delay Between Activations: %lu ms (%lu seconds)\n", 
-                  triggerDays[i].delayBetweenActivations, 
-                  triggerDays[i].delayBetweenActivations / 1000UL);
-    Serial.printf("  Repetitions: %d\n", triggerDays[i].repetitions);
-    Serial.printf("  Current Activations: %d\n", triggerStates[i].activations);
-    Serial.printf("  Is Active: %s\n", triggerStates[i].active ? "Yes" : "No");
-    Serial.printf("  Last Deactivation Time: %lu\n", triggerStates[i].lastDeactivationTime);
-    Serial.printf("  First Activation Pending: %s\n", triggerStates[i].firstActivationPending ? "Yes" : "No");
-}
-
