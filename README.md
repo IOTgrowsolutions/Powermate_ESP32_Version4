@@ -243,5 +243,5 @@ For questions, issues, or contributions:
 
 **Device Name**: PowerMate-{MAC_LAST_4}
 **Default AP**: PowerMate-ESP32
-**Default Password**: powermate123
-**Firmware Version**: 4.0
+**Default Password**: powerm8te
+**Firmware Version**: 4.1
